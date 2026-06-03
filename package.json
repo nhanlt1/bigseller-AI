@@ -1,0 +1,18 @@
+{
+  "name": "bigseller-ai",
+  "version": "1.0.33",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
+    "dev": "vite",
+    "build": "node scripts/bump-version.mjs && npm run icons && tsc --noEmit && vite build && node scripts/sync-root-manifest.mjs",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@types/chrome": "^0.0.287",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}

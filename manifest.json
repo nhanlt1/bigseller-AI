@@ -1,0 +1,131 @@
+{
+  "manifest_version": 3,
+  "name": "BigSeller AI",
+  "version": "1.0.33",
+  "description": "SEO Gemini, tạo ảnh ChatGPT, áp dụng JSON vào form Shopee/BigSeller và tính giá bán.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "https://banhang.shopee.vn/*",
+    "https://banhang.shopee.com/*",
+    "https://*.shopee.vn/*",
+    "https://www.bigseller.com/*",
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
+  "action": {
+    "default_popup": "dist/src/popup/index.html",
+    "default_title": "BigSeller AI"
+  },
+  "options_page": "dist/src/options/index.html",
+  "background": {
+    "service_worker": "dist/service-worker-loader.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "dist/assets/index.ts-loader-xWmfJhgB.js"
+      ],
+      "matches": [
+        "https://banhang.shopee.vn/*",
+        "https://banhang.shopee.com/*"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "js": [
+        "dist/assets/index.ts-loader-DY5cJPrD.js"
+      ],
+      "matches": [
+        "https://www.bigseller.com/*"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "js": [
+        "dist/assets/index.ts-loader-CWLBZ4j2.js"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "js": [
+        "dist/assets/index.ts-loader-B3R1hPMF.js"
+      ],
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "dist/public/icon16.png",
+    "48": "dist/public/icon48.png",
+    "128": "dist/public/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://banhang.shopee.com/*",
+        "https://banhang.shopee.vn/*"
+      ],
+      "resources": [
+        "dist/assets/pricing-popup-VKetlGTQ.js",
+        "dist/assets/dom-utils-Daw0m0qj.js",
+        "dist/assets/messaging-CzGsNQE5.js",
+        "dist/assets/storage-CeBENDeT.js",
+        "dist/assets/formula-engine-Cx8f4h_B.js",
+        "dist/assets/index.ts-CpsGb4sk.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "https://www.bigseller.com/*"
+      ],
+      "resources": [
+        "dist/assets/pricing-popup-VKetlGTQ.js",
+        "dist/assets/dom-utils-Daw0m0qj.js",
+        "dist/assets/messaging-CzGsNQE5.js",
+        "dist/assets/storage-CeBENDeT.js",
+        "dist/assets/formula-engine-Cx8f4h_B.js",
+        "dist/assets/index.ts-DN3hSSyJ.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "resources": [
+        "dist/assets/messaging-CzGsNQE5.js",
+        "dist/assets/dom-utils-Daw0m0qj.js",
+        "dist/assets/index.ts-DwNzoUAa.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "resources": [
+        "dist/assets/messaging-CzGsNQE5.js",
+        "dist/assets/storage-CeBENDeT.js",
+        "dist/assets/dom-utils-Daw0m0qj.js",
+        "dist/assets/index.ts-B51g9-nZ.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

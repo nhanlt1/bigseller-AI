@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BigSeller AI</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <div class="popup">
+      <header>
+        <img id="logo" alt="" width="32" height="32" />
+        <div>
+          <h1>BigSeller AI</h1>
+          <p>Viết lại AI (Gemini) & tính giá</p>
+        </div>
+      </header>
+      <p class="info">
+        Mở trang chỉnh sửa sản phẩm trên <strong>Shopee Seller</strong> hoặc
+        <strong>BigSeller</strong>, nhấn nút <strong>AI</strong> góc phải dưới để mở panel.
+      </p>
+      <div class="actions">
+        <button type="button" id="options-btn" class="btn">Cài đặt</button>
+        <button type="button" id="ping-btn" class="btn primary">Kiểm tra</button>
+      </div>
+      <p id="status" class="status"></p>
+    </div>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
