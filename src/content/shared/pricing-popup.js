@@ -5,11 +5,21 @@ import {
     readShopeeProductCategoryPath,
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
+import { formatPriceInputValue, parsePriceInput } from '../../pricing/price-input.js';
 import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
 import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
 import { getSettings, saveSettings } from '../../shared/storage.js';
 const POPUP_HOST_ID = 'bigseller-ai-pricing-popup-host';
 const FAB_ID = 'bigseller-ai-pricing-fab';
+/** Ô nhập giá VND — hỗ trợ 55k, 26,7k, 55.000 */
+const PRICE_FIELD_IDS = [
+    'cost',
+    'profit',
+    'net-receive',
+    'sell-price',
+    'cost-receive',
+    'infra',
+];
 /** @typedef {'sell' | 'receive'} PricingPopupTab */
 
 export class PricingPopup {
@@ -89,24 +99,29 @@ export class PricingPopup {
         const calc = this.settings.pricingCalculator;
         const fee = this.settings.platformFeeConfig;
         const num = (id) => Number(this.shadow.getElementById(id)?.value) || 0;
-        const costSell = num('cost');
-        const costRecv = num('cost-receive');
+        const price = (id) =>
+            parsePriceInput(this.shadow.getElementById(id)?.value);
+        const costSell = price('cost');
+        const costRecv = price('cost-receive');
         calc.costPerUnit =
             this.activeTab === 'receive'
                 ? costRecv || costSell
                 : costSell || costRecv;
         const profitRaw = this.shadow.getElementById('profit')?.value ?? '';
         calc.useProfitTarget = profitRaw.trim() !== '';
-        calc.desiredProfitPerUnit = calc.useProfitTarget ? Number(profitRaw) || 0 : 0;
-        calc.desiredNetReceivePerUnit = num('net-receive');
-        calc.retailUnitPrice = num('sell-price');
+        calc.desiredProfitPerUnit = calc.useProfitTarget
+            ? parsePriceInput(profitRaw)
+            : 0;
+        calc.desiredNetReceivePerUnit = price('net-receive');
+        calc.retailUnitPrice = price('sell-price');
+        calc.receiveQuantity = Math.max(1, Math.floor(num('receive-qty')) || 1);
         fee.commissionRate = num('commission') / 100;
         fee.paymentFeeRate = num('payment') / 100;
         fee.voucherXtraRate = num('voucher-xtra') / 100;
         fee.useVoucherXtra =
             this.shadow.getElementById('use-voucher-xtra')
                 ?.checked ?? false;
-        fee.infrastructureFeePerOrder = num('infra');
+        fee.infrastructureFeePerOrder = price('infra');
         fee.vatRate = num('vat') / 100;
         fee.pitRate = num('pit') / 100;
         fee.usePiShip =
@@ -157,12 +172,12 @@ export class PricingPopup {
             <section class="section">
               <h3>Sản phẩm</h3>
               <label class="field"><span>Giá vốn (đ/sp)</span>
-                <input type="number" id="cost" min="0" step="100" value="${c.costPerUnit}" /></label>
+                <input type="text" inputmode="decimal" id="cost" autocomplete="off" value="${c.costPerUnit || ''}" placeholder="VD: 6,3k hoặc 6300" /></label>
               <label class="field"><span>Lợi nhuận mong muốn (đ/sp)</span>
-                <input type="number" id="profit" min="0" step="1000" value="${c.useProfitTarget ? (c.desiredProfitPerUnit || '') : ''}" placeholder="Tuỳ chọn" /></label>
+                <input type="text" inputmode="decimal" id="profit" autocomplete="off" value="${c.useProfitTarget ? (c.desiredProfitPerUnit || '') : ''}" placeholder="VD: 10k" /></label>
               <label class="field"><span>Giá muốn nhận về (đ/sp)</span>
-                <input type="number" id="net-receive" min="0" step="1000" value="${c.desiredNetReceivePerUnit || ''}" placeholder="Khi không nhập lợi nhuận" /></label>
-              <p class="field-hint">Nhận về = tiền về sau phí sàn (chưa trừ vốn). Ship do sàn tự chọn — không nhập.</p>
+                <input type="text" inputmode="decimal" id="net-receive" autocomplete="off" value="${c.desiredNetReceivePerUnit || ''}" placeholder="VD: 15k" /></label>
+              <p class="field-hint">Nhận về = tiền về sau phí sàn (chưa trừ vốn). Có thể gõ tắt: 55k, 26,7k, 55.000.</p>
             </section>
             <section class="section results retail-box" id="retail-results"></section>
             <section class="section">
@@ -177,11 +192,15 @@ export class PricingPopup {
           <div class="tab-panel" data-panel="receive"${receiveActive ? '' : ' hidden'}>
             <section class="section">
               <h3>Giá đang bán</h3>
-              <label class="field"><span>Giá bán hiện tại (đ/sp)</span>
-                <input type="number" id="sell-price" min="0" step="100" value="${c.retailUnitPrice || ''}" placeholder="VD: 25000" /></label>
+              <div class="fee-grid">
+                <label class="field"><span>Giá bán hiện tại (đ/sp)</span>
+                  <input type="text" inputmode="decimal" id="sell-price" autocomplete="off" value="${c.retailUnitPrice || ''}" placeholder="VD: 25k" /></label>
+                <label class="field"><span>Số lượng (SP/đơn)</span>
+                  <input type="number" id="receive-qty" min="1" step="1" value="${c.receiveQuantity || 1}" /></label>
+              </div>
               <label class="field"><span>Giá vốn (đ/sp)</span>
-                <input type="number" id="cost-receive" min="0" step="100" value="${c.costPerUnit}" /></label>
-              <p class="field-hint">Nhập giá đang niêm yết — extension tính tiền thực nhận sau phí sàn (cùng công thức đối soát đơn).</p>
+                <input type="text" inputmode="decimal" id="cost-receive" autocomplete="off" value="${c.costPerUnit || ''}" placeholder="VD: 6,3k" /></label>
+              <p class="field-hint">Nhập giá đang niêm yết + số lượng — tính thực nhận và lãi theo đơn (cùng công thức đối soát). Gõ tắt: 55k, 26,7k.</p>
             </section>
             <section class="section results receive-box" id="receive-results"></section>
           </div>
@@ -194,7 +213,7 @@ export class PricingPopup {
               <label class="field"><span>Phí xử lý GD %</span>
                 <input type="number" id="payment" min="0" max="100" step="0.1" value="${(f.paymentFeeRate * 100).toFixed(2)}" /></label>
               <label class="field"><span>Phí hạ tầng (đ/đơn)</span>
-                <input type="number" id="infra" min="0" step="100" value="${f.infrastructureFeePerOrder}" /></label>
+                <input type="text" inputmode="decimal" id="infra" autocomplete="off" value="${f.infrastructureFeePerOrder || ''}" placeholder="VD: 3k" /></label>
             </div>
             <label class="check"><input type="checkbox" id="use-voucher-xtra" ${f.useVoucherXtra ? 'checked' : ''} />
               Voucher Xtra <input type="number" id="voucher-xtra" min="0" max="100" step="0.1" value="${(f.voucherXtraRate * 100).toFixed(2)}" />%</label>
@@ -251,6 +270,17 @@ export class PricingPopup {
             el.addEventListener('input', onInput);
             el.addEventListener('change', onInput);
         });
+        for (const id of PRICE_FIELD_IDS) {
+            const el = this.shadow.getElementById(id);
+            if (!el)
+                continue;
+            el.addEventListener('blur', () => {
+                const formatted = formatPriceInputValue(el.value);
+                if (formatted !== '' && formatted !== el.value)
+                    el.value = formatted;
+                onInput();
+            });
+        }
         const syncCostFields = (sourceId, targetId) => {
             const src = this.shadow.getElementById(sourceId);
             const tgt = this.shadow.getElementById(targetId);
@@ -318,29 +348,38 @@ export class PricingPopup {
         if (!receiveEl)
             return;
         const price = c.retailUnitPrice ?? 0;
+        const qty = Math.max(1, Math.floor(c.receiveQuantity ?? 1));
         if (!price || price <= 0) {
             receiveEl.innerHTML =
                 '<p class="error">Nhập giá bán hiện tại (đ/sp).</p>';
             return;
         }
         const ev = evaluateOrderProfit({
-            quantity: 1,
+            quantity: qty,
             unitPrice: price,
             costPerUnit: c.costPerUnit,
             feeConfig: f,
         });
         const s = ev.settlement;
-        const netPerUnit = Math.round(ev.sellerIncome);
+        const netTotal = Math.round(ev.sellerIncome);
+        const netPerUnit = Math.round(ev.sellerIncome / qty);
+        const profitTotal = Math.round(ev.totalProfit);
         const profitPerUnit = Math.round(ev.profitPerUnit);
-        const profitLine =
+        const qtyLine =
+            qty > 1
+                ? `<p class="ok">Thực nhận tổng (${qty} sp): <strong>${formatVnd(netTotal)}</strong></p>`
+                : '';
+        const profitBlock =
             c.costPerUnit > 0
-                ? `<p class="ok">Lãi sau trừ vốn: <strong>${formatVnd(profitPerUnit)}/sp</strong></p>`
-                : '<p class="muted">Nhập giá vốn để xem lãi sau trừ vốn.</p>';
+                ? `<p class="ok">Tổng lãi sau vốn (${qty} sp): <strong>${formatVnd(profitTotal)}</strong></p>
+          <p class="ok">Lãi/sp (tổng lãi ÷ SL): <strong>${formatVnd(profitPerUnit)}/sp</strong></p>`
+                : '<p class="muted">Nhập giá vốn để xem tổng lãi và lãi/sp.</p>';
         receiveEl.innerHTML = `
-          <h3>Thực nhận (1 SP)</h3>
-          <p class="receive-price">${formatVnd(netPerUnit)}</p>
-          <p class="muted">Giá bán ${formatVnd(price)} · ${this.formatSettlementHint(s)}</p>
-          ${profitLine}
+          <h3>Thực nhận — ${qty} sp × ${formatVnd(price)}</h3>
+          <p class="receive-price">${formatVnd(netPerUnit)}<span class="per">/sp</span></p>
+          ${qtyLine}
+          <p class="muted">${this.formatSettlementHint(s)}</p>
+          ${profitBlock}
         `;
     }
     updateResults() {
@@ -487,13 +526,28 @@ const POPUP_STYLES = `
   .fees-shared { margin-top: 4px; padding-top: 12px; border-top: 1px dashed #e5e7eb; }
   .title { font-weight: 700; font-size: 14px; }
   .btn-close {
-    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
     border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.25);
     color: #fff;
-    font-size: 22px;
-    cursor: pointer;
+    font-size: 28px;
+    font-weight: 400;
     line-height: 1;
-    padding: 0 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+  }
+  .btn-close:hover {
+    background: rgba(255, 255, 255, 0.38);
+  }
+  .btn-close:active {
+    background: rgba(0, 0, 0, 0.12);
   }
   .popup-body {
     flex: 1;
@@ -608,6 +662,11 @@ const POPUP_STYLES = `
     font-size: 22px;
     font-weight: 800;
     color: #1d4ed8;
+  }
+  .receive-price .per {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
   }
   .highlight { color: #047857; font-weight: 600; margin: 0 0 6px; }
   .ok { color: #047857; font-weight: 600; }

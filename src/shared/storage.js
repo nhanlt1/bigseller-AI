@@ -103,6 +103,8 @@ export const DEFAULT_PRICING_CALCULATOR = {
     /** Thu nhập sau phí sàn muốn nhận/sp (khi không nhập lợi nhuận) */
     desiredNetReceivePerUnit: 0,
     retailUnitPrice: 0,
+    /** Số lượng SP/đơn — tab tính giá thực nhận */
+    receiveQuantity: 1,
     wholesaleTiers: [
         { qtyMin: 2, qtyMax: 5, unitPrice: 0 },
         { qtyMin: 6, qtyMax: 10, unitPrice: 0 },

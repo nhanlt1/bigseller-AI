@@ -1,11 +1,6 @@
-const IMAGE_PROMPT_HEADER = `Tạo ảnh quảng cáo sản phẩm Shopee gây ấn tượng với người mua (nổi bật hơn so với các sản phẩm cùng loại trong lưới hiển thị).
-
-Yêu cầu bắt buộc:
-- Tên sản phẩm phải được đặt ở trên cùng ảnh, nhưng không được che khuất sản phẩm
-- Ít chữ trên ảnh
-- Không tự chế logo thương hiệu hay nhãn hiệu không có trong ảnh tham khảo
+const IMAGE_PROMPT_HEADER = `Tạo ảnh vuông 1:1 quảng cáo sản phẩm Shopee gây ấn tượng với người mua (hình ảnh này phải nổi bật hơn so với các sản phẩm cùng loại trong lưới hiển thị).
+Lưu ý:
 - Bám sát hình ảnh sản phẩm trong ảnh đính kèm (màu sắc, hình dáng, chi tiết)
-- Nền sáng, sản phẩm rõ, phù hợp thumbnail Shopee (vuông / gần vuông)
 
 Thông tin sản phẩm (chỉ để hiểu ngữ cảnh, không nhồi chữ lên ảnh):
 Tên sản phẩm:`;
