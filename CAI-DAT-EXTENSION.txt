@@ -1,20 +1,14 @@
-CÁCH TẢI TIỆN ÍCH BIGSELLER AI (Chrome / Edge)
-============================================
+CÁCH TẢI TIỆN ÍCH BIGSELLER AI (Chrome)
+======================================
 
-Cách 1 — Thư mục gốc dự án (sau khi chạy npm run build):
-  Chọn thư mục:  ...\bigseller-AI
-  (phải có file manifest.json ngay trong thư mục này)
+Không cần npm. Không cần build.
 
-Cách 2 — Thư mục build (luôn đúng):
-  Chọn thư mục:  ...\bigseller-AI\dist
+1. Chrome → chrome://extensions
+2. Bật "Chế độ nhà phát triển"
+3. "Tải tiện ích đã giải nén" → chọn thư mục dự án:
+     ...\bigseller-AI
 
-Các bước:
-  1. Mở terminal trong dự án, chạy:  npm install   (lần đầu)
-  2. Chạy:  npm run build
-     (mỗi lần build tự tăng phiên bản patch: 1.0.0 → 1.0.1 → …)
-  3. Chrome → chrome://extensions  (Edge → edge://extensions)
-  4. Bật "Chế độ nhà phát triển"
-  5. "Tải tiện ích đã giải nén" → chọn một trong hai thư mục ở trên
+   (phải có manifest.json ngay trong thư mục này)
 
-Nếu báo "Tệp kê khai bị thiếu":
-  → Chưa chạy npm run build, hoặc chọn sai thư mục (thiếu manifest.json).
+Sau khi sửa code trong src/:
+  → Reload tiện ích trên chrome://extensions.

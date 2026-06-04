@@ -1,0 +1,14 @@
+---
+description: Chrome extension plain JS — no npm build
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# BigSeller AI — Chrome, plain JavaScript
+
+- Code in **`src/**/*.js`**. User loads **project root** in Chrome.
+- **No npm build.** Content scripts: `loader.js` → dynamic `import()` of `index.js` (see `web_accessible_resources` in manifest).
+- Service worker / popup / options: ES modules in manifest.
+- **Never** Vite/dev server. **Never** recreate TypeScript or `bundle.js`.
+- User Reloads on `chrome://extensions`.

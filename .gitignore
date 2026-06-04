@@ -1,4 +1,7 @@
 node_modules/
 dist/
+extension/
+_emit/
+_recovered-gemini/
 *.local
 .DS_Store

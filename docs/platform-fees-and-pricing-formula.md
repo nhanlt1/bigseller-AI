@@ -71,4 +71,4 @@ Giá lẻ: `pMin(1)`.
 
 ## 7. Extension
 
-Tab tính giá: nút nổi **$** → popup (không blur nền). Logic: `src/pricing/order-profit.ts`, `wholesale-tiers.ts`.
+Tab tính giá: nút nổi **$** → popup (không blur nền). Logic: `src/pricing/order-profit.js`, `wholesale-tiers.js`.
