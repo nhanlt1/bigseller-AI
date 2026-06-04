@@ -5,6 +5,7 @@ const DESCRIPTION_EDITOR_OUTER_SELECTORS = SHOPEE_DESCRIPTION_EDITOR_OUTER_SELEC
 const DESCRIPTION_CONTAINER_SELECTORS = SHOPEE_DESCRIPTION_CONTAINER_SELECTORS;
 const DESCRIPTION_FALLBACK_SELECTORS = SHOPEE_DESCRIPTION_FALLBACK_SELECTORS;
 export const shopeeAdapter = {
+    platform: 'shopee',
     canHandle(url) {
         return /banhang\.shopee\.(vn|com)/i.test(url);
     },

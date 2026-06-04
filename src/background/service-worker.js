@@ -75,6 +75,7 @@ async function handleRewriteProduct(payload, senderTabId) {
     const prompt = fillPromptTemplate(settings.promptTemplate, {
         title: payload.title,
         description: payload.description,
+        shopName: payload.shopName ?? '',
         language: payload.language ?? settings.language,
     });
     try {

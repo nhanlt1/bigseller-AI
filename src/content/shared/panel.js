@@ -1,4 +1,5 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
+import { buildPromptProductContext } from '../../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../../shared/storage.js';
 const PANEL_HOST_ID = 'bigseller-ai-panel-host';
 /** Hàng nút tròn góc phải — đồng bộ với image-fab */
@@ -100,9 +101,16 @@ export class FloatingPanel {
         this.copyPromptBtn.addEventListener('click', () => void this.handleCopyPrompt());
         this.applyBtn.addEventListener('click', () => void this.handleApply());
     }
-    async handleRewrite() {
+    promptContextFromPage() {
         const product = this.adapter.extract();
-        if (!product?.title && !product?.description) {
+        if (!product?.title && !product?.description)
+            return null;
+        const platform = this.adapter.platform ?? 'shopee';
+        return buildPromptProductContext(product, platform);
+    }
+    async handleRewrite() {
+        const ctx = this.promptContextFromPage();
+        if (!ctx) {
             this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
             return;
         }
@@ -113,8 +121,9 @@ export class FloatingPanel {
             const result = await sendMessage({
                 type: MessageType.REWRITE_PRODUCT,
                 payload: {
-                    title: product.title,
-                    description: product.description,
+                    title: ctx.title,
+                    description: ctx.description,
+                    shopName: ctx.shopName,
                     language: settings.language,
                 },
             });
@@ -143,8 +152,8 @@ export class FloatingPanel {
         }
     }
     async handleCopyPrompt() {
-        const product = this.adapter.extract();
-        if (!product?.title && !product?.description) {
+        const ctx = this.promptContextFromPage();
+        if (!ctx) {
             this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
             return;
         }
@@ -152,8 +161,9 @@ export class FloatingPanel {
         try {
             const settings = this.settings ?? (await getSettings());
             const prompt = fillPromptTemplate(settings.promptTemplate, {
-                title: product.title,
-                description: product.description,
+                title: ctx.title,
+                description: ctx.description,
+                shopName: ctx.shopName,
                 language: settings.language,
             });
             await navigator.clipboard.writeText(prompt);

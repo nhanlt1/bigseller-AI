@@ -4,7 +4,7 @@ import {
     readShopeeProductCategoryPath,
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
-import { evaluateOrderProfit, solveMinUnitPrice, } from '../../pricing/order-profit.js';
+import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
 import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
 import { getSettings, saveSettings } from '../../shared/storage.js';
 const POPUP_HOST_ID = 'bigseller-ai-pricing-popup-host';
@@ -74,9 +74,10 @@ export class PricingPopup {
         const fee = this.settings.platformFeeConfig;
         const num = (id) => Number(this.shadow.getElementById(id)?.value) || 0;
         calc.costPerUnit = num('cost');
-        calc.desiredProfitPerUnit = num('profit');
-        calc.shippingBuyerPerOrder = num('ship-buyer');
-        calc.sellerShippingBurdenPerOrder = num('ship-seller');
+        const profitRaw = this.shadow.getElementById('profit')?.value ?? '';
+        calc.useProfitTarget = profitRaw.trim() !== '';
+        calc.desiredProfitPerUnit = calc.useProfitTarget ? Number(profitRaw) || 0 : 0;
+        calc.desiredNetReceivePerUnit = num('net-receive');
         fee.commissionRate = num('commission') / 100;
         fee.paymentFeeRate = num('payment') / 100;
         fee.voucherXtraRate = num('voucher-xtra') / 100;
@@ -125,11 +126,10 @@ export class PricingPopup {
             <label class="field"><span>Giá vốn (đ/sp)</span>
               <input type="number" id="cost" min="0" step="100" value="${c.costPerUnit}" /></label>
             <label class="field"><span>Lợi nhuận mong muốn (đ/sp)</span>
-              <input type="number" id="profit" min="0" step="1000" value="${c.desiredProfitPerUnit}" /></label>
-            <label class="field"><span>Phí ship khách/đơn (chỉ tính phí GD)</span>
-              <input type="number" id="ship-buyer" min="0" step="1000" value="${c.shippingBuyerPerOrder ?? 0}" /></label>
-            <label class="field"><span>Seller chịu ship/đơn</span>
-              <input type="number" id="ship-seller" min="0" step="1000" value="${c.sellerShippingBurdenPerOrder ?? 0}" /></label>
+              <input type="number" id="profit" min="0" step="1000" value="${c.useProfitTarget ? (c.desiredProfitPerUnit || '') : ''}" placeholder="Tuỳ chọn" /></label>
+            <label class="field"><span>Giá muốn nhận về (đ/sp)</span>
+              <input type="number" id="net-receive" min="0" step="1000" value="${c.desiredNetReceivePerUnit || ''}" placeholder="Khi không nhập lợi nhuận" /></label>
+            <p class="field-hint">Nhận về = tiền về sau phí sàn (chưa trừ vốn). Ship do sàn tự chọn — không nhập.</p>
           </section>
           <section class="section results retail-box" id="retail-results"></section>
           <section class="section">
@@ -223,15 +223,6 @@ export class PricingPopup {
         }
         this.updateResults();
     };
-    orderOpts() {
-        const c = this.settings?.pricingCalculator;
-        if (!c)
-            return {};
-        return {
-            shippingBuyerForPayment: c.shippingBuyerPerOrder ?? 0,
-            sellerShippingBurden: c.sellerShippingBurdenPerOrder ?? 0,
-        };
-    }
     formatSettlementHint(s) {
         return `Phụ phí ${formatVnd(s.platformFeesTotal)} · Thuế ${formatVnd(s.taxTotal)} · Thu nhập ${formatVnd(s.sellerIncome)}`;
     }
@@ -240,13 +231,19 @@ export class PricingPopup {
             return;
         const c = this.settings.pricingCalculator;
         const f = this.settings.platformFeeConfig;
-        const opts = this.orderOpts();
-        const retailPrice = solveMinUnitPrice(1, c.costPerUnit, c.desiredProfitPerUnit, f, opts);
+        const target = resolvePricingTarget(c);
+        const retailPrice = target
+            ? solveMinUnitPriceByTarget(1, c.costPerUnit, target, f)
+            : null;
         const retailEl = this.shadow.getElementById('retail-results');
         if (retailEl) {
-            if (retailPrice == null) {
+            if (!target) {
                 retailEl.innerHTML =
-                    '<p class="error">Không tính được giá — giảm % phí hoặc lợi nhuận mục tiêu.</p>';
+                    '<p class="error">Nhập lợi nhuận mong muốn hoặc giá muốn nhận về (đ/sp).</p>';
+            }
+            else if (retailPrice == null) {
+                retailEl.innerHTML =
+                    '<p class="error">Không tính được giá — giảm % phí hoặc mục tiêu nhập.</p>';
             }
             else {
                 const ev = evaluateOrderProfit({
@@ -254,22 +251,24 @@ export class PricingPopup {
                     unitPrice: retailPrice,
                     costPerUnit: c.costPerUnit,
                     feeConfig: f,
-                    ...opts,
                 });
                 const s = ev.settlement;
+                const incomePerUnit = Math.round(ev.sellerIncome);
+                const outcomeLine = target.kind === 'profit'
+                    ? `<p class="ok">Lời sau phí: <strong>${formatVnd(Math.round(ev.profitPerUnit))}/sp</strong> (mục tiêu ${formatVnd(target.perUnit)})</p>`
+                    : `<p class="ok">Nhận về: <strong>${formatVnd(incomePerUnit)}/sp</strong> (mục tiêu ${formatVnd(target.perUnit)}) · Lời ${formatVnd(Math.round(ev.profitPerUnit))}/sp</p>`;
                 retailEl.innerHTML = `
           <h3>Giá bán lẻ (1 SP)</h3>
           <p class="retail-price">${formatVnd(retailPrice)}</p>
-          <p class="muted">Ngược từ: tiền hàng − Phụ phí − Thuế + seller ship = vốn + lời/sp</p>
           <p class="muted">${this.formatSettlementHint(s)}</p>
-          <p class="ok">Lời sau phí: <strong>${formatVnd(Math.round(ev.profitPerUnit))}/sp</strong> (mục tiêu ${formatVnd(c.desiredProfitPerUnit)})</p>
+          ${outcomeLine}
         `;
             }
         }
         const tierEl = this.shadow.getElementById('tier-results');
         if (!tierEl)
             return;
-        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c.desiredProfitPerUnit, f, opts);
+        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c, f);
         if (evals.length === 0) {
             tierEl.innerHTML = '<p class="muted">Nhập ít nhất một bậc (min ≤ max, SL &gt; 0).</p>';
             return;
@@ -280,8 +279,8 @@ export class PricingPopup {
             if (!cell || !tier)
                 continue;
             const valid = tier.qtyMin > 0 && tier.qtyMax >= tier.qtyMin;
-            const price = valid
-                ? solveMinUnitPrice(tier.qtyMin, c.costPerUnit, c.desiredProfitPerUnit, f, opts)
+            const price = valid && target
+                ? solveMinUnitPriceByTarget(tier.qtyMin, c.costPerUnit, target, f)
                 : null;
             cell.textContent = price != null ? formatVnd(price) : '—';
             cell.className = price != null ? 'tier-price ok' : 'tier-price';
@@ -292,11 +291,13 @@ export class PricingPopup {
                 return `<div class="tier-card"><strong>Bậc ${e.tierIndex}</strong> (${e.qtyMin}–${e.qtyMax} SP)<br/><span class="error">Không tính được — kiểm tra % phí</span></div>`;
             }
             return `<div class="tier-card">
-          <strong>Bậc ${e.tierIndex}</strong> (${e.qtyMin}–${e.qtyMax} SP)
+          <strong>Bậc ${e.tierIndex}</strong> — khách mua ${e.qtyMin}–${e.qtyMax} sp
           <p class="tier-price-lg">${formatVnd(e.computedUnitPrice)}<span class="per">/sp</span></p>
-          <p class="muted">Tính theo min SL bậc · cùng công thức đối soát đơn</p>
-          <p class="ok">Lời @min ${e.qtyMin} SP: <strong>${formatVnd(e.profitPerUnitAtMin)}/sp</strong>
-            · @max ${e.qtyMax} SP: <strong>${formatVnd(e.profitPerUnitAtMax)}/sp</strong></p>
+          <p class="tier-outcome-label">Nếu khách mua đúng ${e.qtyMin} sp:</p>
+          <ul class="tier-stats">
+            <li>Tiền về sau phí sàn: <strong>${formatVnd(e.netReceivePerUnitAtMin)}/sp</strong></li>
+            <li>Lãi còn lại (trừ giá vốn): <strong>${formatVnd(e.profitPerUnitAtMin)}/sp</strong></li>
+          </ul>
         </div>`;
         })
             .join('');
@@ -355,6 +356,12 @@ const POPUP_STYLES = `
   }
   .field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
   .field span { font-size: 11px; font-weight: 600; color: #6b7280; }
+  .field-hint {
+    margin: -4px 0 8px;
+    font-size: 10px;
+    color: #9ca3af;
+    line-height: 1.35;
+  }
   .field input, .tier-table input {
     padding: 6px 8px;
     border: 1px solid #d1d5db;
@@ -398,6 +405,20 @@ const POPUP_STYLES = `
     font-size: 12px;
     line-height: 1.5;
   }
+  .tier-outcome-label {
+    margin: 6px 0 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .tier-stats {
+    margin: 0;
+    padding-left: 18px;
+    color: #047857;
+    font-size: 12px;
+  }
+  .tier-stats li { margin: 2px 0; }
+  .tier-stats strong { font-weight: 700; }
   .retail-box {
     background: #ecfdf5;
     border: 1px solid #a7f3d0;

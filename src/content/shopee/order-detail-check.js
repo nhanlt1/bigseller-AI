@@ -1,10 +1,20 @@
-import { formatVnd } from '../../pricing/formula-engine.js';
-import { amountsMatch, buildSettlementFromRows, computeExtensionSettlement, expectedValueForRow, inferIncomeRowRole, parseVndText, resolveRowRole, rowCheckTitle, } from '../../pricing/order-settlement.js';
-import { getSettings } from '../../shared/storage.js';
-import { observeDomChanges } from '../shared/dom-utils.js';
+import { formatVnd } from "../../pricing/formula-engine.js";
+import {
+  amountsMatch,
+  buildSettlementFromRows,
+  computeExtensionSettlement,
+  expectedValueForRow,
+  extractIncomeLabel,
+  parseVndText,
+  resolveIncomeRowRole,
+  resolveRowRole,
+  rowCheckTitle,
+} from "../../pricing/order-settlement.js";
+import { getSettings } from "../../shared/storage.js";
+import { observeDomChanges } from "../shared/dom-utils.js";
 
-const STYLE_ID = 'bigseller-ai-order-check-style';
-const FLOAT_ID = 'bigseller-ai-order-check-float';
+const STYLE_ID = "bigseller-ai-order-check-style";
+const FLOAT_ID = "bigseller-ai-order-check-float";
 let checkObserverBound = false;
 let positionListenersBound = false;
 let positionRaf = 0;
@@ -12,15 +22,14 @@ let positionRaf = 0;
 let floatRowRefs = [];
 
 export function isShopeeOrderDetailUrl(url = location.href) {
-    return /banhang\.shopee\.(vn|com)\/portal\/sale\/order\/\d+/i.test(url);
+  return /banhang\.shopee\.(vn|com)\/portal\/sale\/order\/\d+/i.test(url);
 }
 
 function ensureStyles() {
-    if (document.getElementById(STYLE_ID))
-        return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
       #${FLOAT_ID} {
         position: fixed;
         inset: 0;
@@ -86,199 +95,191 @@ function ensureStyles() {
         background: rgba(249,250,251,.9);
       }
     `;
-    document.head.appendChild(style);
+  document.head.appendChild(style);
 }
 
 function readIncomeRows(container) {
-    const rows = [];
-    let subtotalIndex = 0;
-    let groupIndex = -1;
-    for (const child of container.children) {
-        if (child.classList.contains('income-item')) {
-            const valueEl = child.querySelector('.income-value');
-            if (!valueEl)
-                continue;
-            const labelEl = child.querySelector('.income-label, .income-name, [class*="label"]');
-            const label = (labelEl?.textContent ?? child.textContent ?? '')
-                .replace(valueEl.textContent ?? '', '')
-                .trim();
-            const isSubtotal = child.classList.contains('income-subtotal');
-            const isHighlighted = child.classList.contains('highlighted');
-            const role = inferIncomeRowRole({
-                isSubtotal,
-                subtotalIndex: isSubtotal ? subtotalIndex : null,
-                groupIndex: null,
-                itemIndex: null,
-                isHighlighted,
-            });
-            if (isSubtotal)
-                subtotalIndex += 1;
-            rows.push({
-                item: child,
-                label,
-                value: parseVndText(valueEl.textContent),
-                valueEl,
-                role,
-            });
-            continue;
-        }
-        if (!child.classList.contains('income-group'))
-            continue;
-        groupIndex += 1;
-        child.querySelectorAll(':scope > .income-item').forEach((item, itemIndex) => {
-            const valueEl = item.querySelector('.income-value');
-            if (!valueEl)
-                return;
-            const labelEl = item.querySelector('.income-label, .income-name, [class*="label"]');
-            const label = (labelEl?.textContent ?? item.textContent ?? '')
-                .replace(valueEl.textContent ?? '', '')
-                .trim();
-            rows.push({
-                item,
-                label,
-                value: parseVndText(valueEl.textContent),
-                valueEl,
-                role: inferIncomeRowRole({
-                    isSubtotal: false,
-                    subtotalIndex: null,
-                    groupIndex,
-                    itemIndex,
-                    isHighlighted: false,
-                }),
-            });
-        });
+  const rows = [];
+  let groupIndex = -1;
+  for (const child of container.children) {
+    if (child.classList.contains("income-item")) {
+      const valueEl = child.querySelector(".income-value");
+      if (!valueEl) continue;
+      const label = extractIncomeLabel(child);
+      const isSubtotal = child.classList.contains("income-subtotal");
+      const isHighlighted = child.classList.contains("highlighted");
+      rows.push({
+        item: child,
+        label,
+        value: parseVndText(valueEl.textContent),
+        valueEl,
+        role: resolveIncomeRowRole({
+          label,
+          isSubtotal,
+          isHighlighted,
+          groupIndex: null,
+        }),
+      });
+      continue;
     }
-    return rows;
+    if (!child.classList.contains("income-group")) continue;
+    groupIndex += 1;
+    child
+      .querySelectorAll(":scope > .income-item")
+      .forEach((item) => {
+        const valueEl = item.querySelector(".income-value");
+        if (!valueEl) return;
+        const label = extractIncomeLabel(item);
+        rows.push({
+          item,
+          label,
+          value: parseVndText(valueEl.textContent),
+          valueEl,
+          role: resolveIncomeRowRole({
+            label,
+            isSubtotal: false,
+            isHighlighted: false,
+            groupIndex,
+          }),
+        });
+      });
+  }
+  return rows;
 }
 
 function removeFloatOverlay() {
-    floatRowRefs = [];
-    document.getElementById(FLOAT_ID)?.remove();
+  floatRowRefs = [];
+  document.getElementById(FLOAT_ID)?.remove();
 }
 
 function bindPositionListeners() {
-    if (positionListenersBound)
-        return;
-    positionListenersBound = true;
-    const schedule = () => {
-        cancelAnimationFrame(positionRaf);
-        positionRaf = requestAnimationFrame(positionFloatOverlay);
-    };
-    window.addEventListener('scroll', schedule, true);
-    window.addEventListener('resize', schedule);
+  if (positionListenersBound) return;
+  positionListenersBound = true;
+  const schedule = () => {
+    cancelAnimationFrame(positionRaf);
+    positionRaf = requestAnimationFrame(positionFloatOverlay);
+  };
+  window.addEventListener("scroll", schedule, true);
+  window.addEventListener("resize", schedule);
 }
 
 function positionFloatOverlay() {
-    const float = document.getElementById(FLOAT_ID);
-    if (!float)
-        return;
-    const header = float.querySelector('.bigseller-ai-check-float-header');
-    const banner = float.querySelector('.bigseller-ai-check-float-banner');
-    const anchor = floatRowRefs[0]?.valueEl;
-    if (!anchor?.isConnected) {
-        removeFloatOverlay();
-        return;
-    }
-    const firstRect = anchor.getBoundingClientRect();
-    const gap = 8;
-    if (header) {
-        header.style.top = `${Math.max(8, firstRect.top - 26)}px`;
-        header.style.left = `${firstRect.right + gap}px`;
-    }
-    if (banner && header) {
-        const headerRect = header.getBoundingClientRect();
-        banner.style.top = `${Math.max(8, headerRect.top - 72)}px`;
-        banner.style.left = `${firstRect.right + gap}px`;
-    }
-    for (const { valueEl, cellEl } of floatRowRefs) {
-        if (!valueEl.isConnected)
-            continue;
-        const rect = valueEl.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0)
-            continue;
-        cellEl.style.top = `${rect.top}px`;
-        cellEl.style.left = `${rect.right + gap}px`;
-        cellEl.style.height = `${Math.max(rect.height, 28)}px`;
-    }
+  const float = document.getElementById(FLOAT_ID);
+  if (!float) return;
+  const header = float.querySelector(".bigseller-ai-check-float-header");
+  const banner = float.querySelector(".bigseller-ai-check-float-banner");
+  const anchor = floatRowRefs[0]?.valueEl;
+  if (!anchor?.isConnected) {
+    removeFloatOverlay();
+    return;
+  }
+  const firstRect = anchor.getBoundingClientRect();
+  const gap = 8;
+  if (header) {
+    header.style.top = `${Math.max(8, firstRect.top - 26)}px`;
+    header.style.left = `${firstRect.right + gap}px`;
+  }
+  if (banner && header) {
+    const headerRect = header.getBoundingClientRect();
+    banner.style.top = `${Math.max(8, headerRect.top - 72)}px`;
+    banner.style.left = `${firstRect.right + gap}px`;
+  }
+  for (const { valueEl, cellEl } of floatRowRefs) {
+    if (!valueEl.isConnected) continue;
+    const rect = valueEl.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) continue;
+    cellEl.style.top = `${rect.top}px`;
+    cellEl.style.left = `${rect.right + gap}px`;
+    cellEl.style.height = `${Math.max(rect.height, 28)}px`;
+  }
 }
 
 function renderCheckColumn(container, settings) {
-    removeFloatOverlay();
-    const rows = readIncomeRows(container);
-    if (rows.length === 0)
-        return;
-    const parsed = buildSettlementFromRows(rows);
-    const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
-    ensureStyles();
-    bindPositionListeners();
-    const float = document.createElement('div');
-    float.id = FLOAT_ID;
-    const header = document.createElement('div');
-    header.className = 'bigseller-ai-check-float-header';
-    header.textContent = 'Kiểm tra ($)';
-    float.appendChild(header);
-    const finalRow = rows.find((r) => resolveRowRole(r) === 'sellerIncome') ??
-        rows.find((r) => r.item.classList.contains('highlighted')) ??
-        rows[rows.length - 1];
-    const finalExpected = calc.sellerIncome;
-    const finalMatch = amountsMatch(finalRow.value, finalExpected);
-    const banner = document.createElement('div');
-    banner.className = `bigseller-ai-check-float-banner${finalMatch ? ' ok' : ''}`;
-    banner.innerHTML = finalMatch
-        ? `✓ Thu nhập khớp (<strong>${formatVnd(finalExpected)}</strong>).`
-        : `✗ Shopee <strong>${formatVnd(finalRow.value)}</strong> ≠ ext. <strong>${formatVnd(finalExpected)}</strong> (lệch ${formatVnd(finalRow.value - finalExpected)}). Chỉnh % phí nút <strong>$</strong>.`;
-    float.appendChild(banner);
-    for (const row of rows) {
-        const role = resolveRowRole(row);
-        const expected = expectedValueForRow(role, calc);
-        const cell = document.createElement('div');
-        cell.className = 'bigseller-ai-check-float-cell';
-        if (expected == null) {
-            cell.classList.add('na');
-            cell.textContent = '—';
-            const hint = rowCheckTitle(role, calc);
-            cell.title = role === 'shippingDetail'
-                ? 'Chi tiết ship/voucher — không đưa vào công thức'
-                : hint || 'Extension không tính dòng này';
-        }
-        else {
-            const match = amountsMatch(row.value, expected);
-            cell.classList.add(match ? 'match' : 'mismatch');
-            cell.textContent = `${formatVnd(expected)}${match ? ' ✓' : ''}`;
-            const hint = rowCheckTitle(role, calc);
-            cell.title = match
-                ? (hint || 'Khớp công thức extension')
-                : `${hint ? `${hint} · ` : ''}Shopee ${formatVnd(row.value)} · extension ${formatVnd(expected)}`;
-        }
-        float.appendChild(cell);
-        floatRowRefs.push({ valueEl: row.valueEl, cellEl: cell });
+  removeFloatOverlay();
+  const rows = readIncomeRows(container);
+  if (rows.length === 0) return;
+  const parsed = buildSettlementFromRows(rows);
+  const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
+  ensureStyles();
+  bindPositionListeners();
+  const float = document.createElement("div");
+  float.id = FLOAT_ID;
+  const header = document.createElement("div");
+  header.className = "bigseller-ai-check-float-header";
+  header.textContent = "Kiểm tra ($)";
+  float.appendChild(header);
+  const finalRow =
+    rows.find((r) => resolveRowRole(r) === "sellerIncome") ??
+    rows.find((r) => r.item.classList.contains("highlighted")) ??
+    rows[rows.length - 1];
+  const finalExpected = calc.sellerIncome;
+  const finalMatch = amountsMatch(finalRow.value, finalExpected);
+  const banner = document.createElement("div");
+  banner.className = `bigseller-ai-check-float-banner${finalMatch ? " ok" : ""}`;
+  banner.innerHTML = finalMatch
+    ? `✓ Thu nhập khớp (<strong>${formatVnd(finalExpected)}</strong>).`
+    : `✗ Shopee <strong>${formatVnd(finalRow.value)}</strong> ≠ ext. <strong>${formatVnd(finalExpected)}</strong> (lệch ${formatVnd(finalRow.value - finalExpected)}). Chỉnh % phí nút <strong>$</strong>.`;
+  float.appendChild(banner);
+  for (const row of rows) {
+    const role = resolveRowRole(row);
+    const expected = expectedValueForRow(role, calc);
+    const cell = document.createElement("div");
+    cell.className = "bigseller-ai-check-float-cell";
+    const fromDom =
+      (role === "commission" && calc.usedDomCommission) ||
+      (role === "payment" && calc.usedDomPayment) ||
+      (role === "piShip" && calc.usedDomPiShip);
+    if (expected == null) {
+      cell.classList.add("na");
+      cell.textContent = "—";
+      const hint = rowCheckTitle(role, calc);
+      cell.title =
+        role === "shippingDetail"
+          ? "Chi tiết ship/voucher — không đưa vào công thức"
+          : hint || "Extension không tính dòng này";
+    } else if (fromDom) {
+      cell.classList.add("match");
+      cell.textContent = "đơn ✓";
+      cell.title = rowCheckTitle(role, calc) || "Dùng số trên đơn để tính thu nhập";
+    } else {
+      const match = amountsMatch(row.value, expected);
+      cell.classList.add(match ? "match" : "mismatch");
+      cell.textContent = `${formatVnd(expected)}${match ? " ✓" : ""}`;
+      const hint = rowCheckTitle(role, calc);
+      cell.title = match
+        ? hint || "Khớp công thức extension"
+        : `${hint ? `${hint} · ` : ""}Shopee ${formatVnd(row.value)} · extension ${formatVnd(expected)}`;
     }
-    document.body.appendChild(float);
-    positionFloatOverlay();
+    float.appendChild(cell);
+    floatRowRefs.push({ valueEl: row.valueEl, cellEl: cell });
+  }
+  document.body.appendChild(float);
+  positionFloatOverlay();
 }
 
 async function refreshOrderCheck() {
-    if (!isShopeeOrderDetailUrl()) {
-        removeFloatOverlay();
-        return;
-    }
-    const container = document.querySelector('.order-detail .payment-info-detail .income-container, .order-detail .income-container');
-    if (!container) {
-        removeFloatOverlay();
-        return;
-    }
-    const settings = await getSettings();
-    renderCheckColumn(container, settings);
+  if (!isShopeeOrderDetailUrl()) {
+    removeFloatOverlay();
+    return;
+  }
+  const container = document.querySelector(
+    ".order-detail .payment-info-detail .income-container, .order-detail .income-container",
+  );
+  if (!container) {
+    removeFloatOverlay();
+    return;
+  }
+  const settings = await getSettings();
+  renderCheckColumn(container, settings);
 }
 
 export function mountOrderDetailCheck() {
-    if (!isShopeeOrderDetailUrl())
-        return;
-    if (!checkObserverBound) {
-        checkObserverBound = true;
-        observeDomChanges(() => {
-            void refreshOrderCheck();
-        });
-    }
-    void refreshOrderCheck();
+  if (!isShopeeOrderDetailUrl()) return;
+  if (!checkObserverBound) {
+    checkObserverBound = true;
+    observeDomChanges(() => {
+      void refreshOrderCheck();
+    });
+  }
+  void refreshOrderCheck();
 }

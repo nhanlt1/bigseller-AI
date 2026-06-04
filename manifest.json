@@ -24,7 +24,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://banhang.shopee.vn/*", "https://banhang.shopee.com/*"],
+      "matches": [
+        "https://banhang.shopee.vn/*",
+        "https://banhang.shopee.com/*",
+        "https://*.shopee.vn/*"
+      ],
       "js": ["src/content/shopee/loader.js"],
       "run_at": "document_idle"
     },

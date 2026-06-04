@@ -1,13 +1,16 @@
-import { evaluateOrderProfit, solveMinUnitPrice } from './order-profit.js';
+import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from './order-profit.js';
 const MAX_TIERS = 5;
 export function normalizeTiers(tiers) {
     return tiers
         .filter((t) => t.qtyMin > 0 && t.qtyMax >= t.qtyMin)
         .slice(0, MAX_TIERS);
 }
-export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfig, orderOpts = {}) {
+export function evaluateTiers(tiers, costPerUnit, calc, feeConfig, orderOpts = {}) {
+    const target = resolvePricingTarget(calc);
     return normalizeTiers(tiers).map((tier, index) => {
-        const computed = solveMinUnitPrice(tier.qtyMin, costPerUnit, desiredProfitPerUnit, feeConfig, orderOpts) ?? 0;
+        const computed = target
+            ? solveMinUnitPriceByTarget(tier.qtyMin, costPerUnit, target, feeConfig, orderOpts) ?? 0
+            : 0;
         const profitAtMin = computed > 0
             ? evaluateOrderProfit({
                 quantity: tier.qtyMin,
@@ -26,6 +29,19 @@ export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfi
                 ...orderOpts,
             }).profitPerUnit
             : 0;
+        const incomeAtMin = computed > 0
+            ? evaluateOrderProfit({
+                quantity: tier.qtyMin,
+                unitPrice: computed,
+                costPerUnit,
+                feeConfig,
+                ...orderOpts,
+            }).sellerIncome / tier.qtyMin
+            : 0;
+        const meetsTarget = computed > 0 &&
+            (target?.kind === 'netReceive'
+                ? incomeAtMin >= (target.perUnit ?? 0)
+                : profitAtMin >= (target?.perUnit ?? 0));
         return {
             tierIndex: index + 1,
             qtyMin: tier.qtyMin,
@@ -33,7 +49,8 @@ export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfi
             computedUnitPrice: computed,
             profitPerUnitAtMin: Math.round(profitAtMin),
             profitPerUnitAtMax: Math.round(profitAtMax),
-            meetsTarget: computed > 0 && profitAtMin >= desiredProfitPerUnit,
+            netReceivePerUnitAtMin: Math.round(incomeAtMin),
+            meetsTarget,
         };
     });
 }

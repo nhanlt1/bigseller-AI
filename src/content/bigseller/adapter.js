@@ -3,6 +3,7 @@ import { getInputValue, queryFirst, setInputValue } from '../shared/dom-utils.js
 const TITLE_SELECTORS = BIGSELLER_TITLE_SELECTORS;
 const DESCRIPTION_SELECTORS = BIGSELLER_DESCRIPTION_SELECTORS;
 export const bigsellerAdapter = {
+    platform: 'bigseller',
     canHandle(url) {
         return /bigseller\.com/i.test(url);
     },

@@ -41,6 +41,11 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 - Ví dụ đúng: {"title":"Áo thun nam form rộng","description":"Chất cotton...\\nSize S-XL"}`;
 export const DEFAULT_PROMPT_TEMPLATE = `Bạn là chuyên gia SEO Shopee Việt Nam. Viết lại tiêu đề và mô tả bằng tiếng {language} từ nội dung gốc bên dưới. Chỉ dùng thông tin có trong bản gốc hoặc suy ra hợp lý từ ngành hàng; không bịa thương hiệu, thông số, cam kết.
 
+=== GIAN HÀNG (bắt buộc trong mô tả) ===
+Tên gian hàng duy nhất được phép nhắc trong mô tả mới: {shopName}
+- Mô tả gốc đã được gỡ mọi tên gian hàng / shop khác; không thêm tên cửa hàng, thương hiệu shop hay tag shop nào khác ngoài tên trên.
+- Nếu {shopName} trống: không chèn tên gian hàng vào mô tả.
+
 === BƯỚC 1 — TÌM TỪ KHÓA VÀNG (làm trước khi viết tiêu đề/mô tả) ===
 1) Xác định người mua chính và NỖI ĐAU / lo lắng / mong muốn khi mua loại sản phẩm này (đọc kỹ tiêu đề + mô tả gốc).
    Ví dụ nỗi đau: con viết xấu, sai thế ngón tay, hay đau tay, hao pin, da dầu mụn, quần áo bị lem màu…
@@ -80,10 +85,10 @@ export const DEFAULT_PRICING_FORMULA = '(cost * (1 + profitRate) + shippingSubsi
 export const DEFAULT_PRICING_CALCULATOR = {
     costPerUnit: 6300,
     desiredProfitPerUnit: 10000,
-    /** Phí ship khách/đơn — chỉ dùng tính phí xử lý GD (không cộng vào thu nhập) */
-    shippingBuyerPerOrder: 0,
-    /** Phần seller chịu ship (subtotal strong[1] trên đơn) */
-    sellerShippingBurdenPerOrder: 0,
+    /** true = dùng lợi nhuận/sp; false = dùng giá muốn nhận về/sp */
+    useProfitTarget: true,
+    /** Thu nhập sau phí sàn muốn nhận/sp (khi không nhập lợi nhuận) */
+    desiredNetReceivePerUnit: 0,
     retailUnitPrice: 0,
     wholesaleTiers: [
         { qtyMin: 2, qtyMax: 5, unitPrice: 0 },
@@ -117,6 +122,8 @@ export async function getSettings() {
         pricingCalculator: {
             ...DEFAULT_SETTINGS.pricingCalculator,
             ...stored?.pricingCalculator,
+            useProfitTarget: stored?.pricingCalculator?.useProfitTarget ??
+                (stored?.pricingCalculator?.desiredProfitPerUnit ?? DEFAULT_PRICING_CALCULATOR.desiredProfitPerUnit) > 0,
             wholesaleTiers: stored?.pricingCalculator?.wholesaleTiers?.length === 5
                 ? stored.pricingCalculator.wholesaleTiers
                 : DEFAULT_SETTINGS.pricingCalculator.wholesaleTiers,
@@ -134,10 +141,12 @@ export async function saveSettings(partial) {
     });
 }
 export function fillPromptTemplate(template, vars) {
+    const shopName = vars.shopName?.trim() ?? '';
     const body = template
         .replace(/\{title\}/g, vars.title)
         .replace(/\{description\}/g, vars.description)
         .replace(/\{language\}/g, vars.language)
+        .replace(/\{shopName\}/g, shopName || '(không có — không chèn tên gian hàng)')
         .trim();
     if (body.includes('ĐẦU RA BẮT BUỘC')) {
         return body;

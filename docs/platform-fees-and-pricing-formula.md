@@ -45,7 +45,9 @@ Thuế = 1% GTGT×tiền hàng + 0,5% TNCN×tiền hàng
 Thu nhập = tiền hàng + seller chịu ship − Phụ phí − Thuế
 ```
 
-Chi tiết ship/voucher trong `income-group[1]` **không** cộng vào thu nhập (chỉ lấy phí ship khách để tính phí GD).
+Chi tiết ship/voucher trong `income-group[1]` **không** cộng vào thu nhập.
+
+**Trang đối soát đơn:** map theo nhãn `.income-label-text` (không theo chỉ số cố định). Lấy từ DOM: **Phí cố định**, **PiShip** (nếu có, thường 2.700đ), **Phí xử lý GD**. Tính extension: **Phí Dịch Vụ** (3.000 + Voucher Xtra) + thuế. Cột Kiểm tra ($) căn từng dòng DOM — dòng ship chi tiết hiển thị «—».
 
 ### Đơn mẫu (đã kiểm chứng)
 
@@ -73,7 +75,7 @@ Thu nhập = p×q + sellerShip − Phụ phí − Thuế
 `Phụ phí` = phí cố định%×tiền hàng + (3.000 + Voucher Xtra) + phí GD%×(tiền hàng + phí ship khách).  
 `Thuế` = GTGT%×tiền hàng + TNCN%×tiền hàng.
 
-Popup **$**: nhập phí ship khách/đơn (chỉ cho phí GD), seller chịu ship, % phí và thuế — giá lẻ/buôn tự cập nhật.
+Popup **$**: nhập **lợi nhuận/sp** hoặc (nếu để trống lợi nhuận) **giá muốn nhận về/sp** — thu nhập sau phí sàn, chưa trừ vốn. Ship do sàn tự chọn, không nhập. % phí lấy từ danh mục SP khi có.
 
 ## 7. Phí cố định theo danh mục (trang sản phẩm)
 
