@@ -2,6 +2,7 @@ import {
     formatCommissionPercent,
     lookupCategoryCommission,
     readProductCategoryPath,
+    readShopeeProductCategoryPath,
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
 import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
@@ -9,10 +10,14 @@ import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
 import { getSettings, saveSettings } from '../../shared/storage.js';
 const POPUP_HOST_ID = 'bigseller-ai-pricing-popup-host';
 const FAB_ID = 'bigseller-ai-pricing-fab';
+/** @typedef {'sell' | 'receive'} PricingPopupTab */
+
 export class PricingPopup {
     host;
     shadow;
     visible = false;
+    /** @type {PricingPopupTab} */
+    activeTab = 'sell';
     settings = null;
     categoryLookup = null;
     saveTimer = null;
@@ -36,11 +41,16 @@ export class PricingPopup {
             void this.loadAndRender();
     }
     async loadAndRender() {
-        this.settings = await getSettings();
-        this.applyCategoryCommissionFromPage();
-        this.render();
-        this.bindEvents();
-        this.updateResults();
+        try {
+            this.settings = await getSettings();
+            this.applyCategoryCommissionFromPage();
+            this.render();
+            this.bindEvents();
+            this.updateResults();
+        }
+        catch {
+            /* context invalidated — storage/messaging đã nhắc F5 */
+        }
     }
     applyCategoryCommissionFromPage() {
         if (!this.settings)
@@ -63,10 +73,15 @@ export class PricingPopup {
     async persist() {
         if (!this.settings)
             return;
-        await saveSettings({
-            pricingCalculator: this.settings.pricingCalculator,
-            platformFeeConfig: this.settings.platformFeeConfig,
-        });
+        try {
+            await saveSettings({
+                pricingCalculator: this.settings.pricingCalculator,
+                platformFeeConfig: this.settings.platformFeeConfig,
+            });
+        }
+        catch {
+            /* extension context invalidated */
+        }
     }
     readForm() {
         if (!this.settings)
@@ -74,11 +89,17 @@ export class PricingPopup {
         const calc = this.settings.pricingCalculator;
         const fee = this.settings.platformFeeConfig;
         const num = (id) => Number(this.shadow.getElementById(id)?.value) || 0;
-        calc.costPerUnit = num('cost');
+        const costSell = num('cost');
+        const costRecv = num('cost-receive');
+        calc.costPerUnit =
+            this.activeTab === 'receive'
+                ? costRecv || costSell
+                : costSell || costRecv;
         const profitRaw = this.shadow.getElementById('profit')?.value ?? '';
         calc.useProfitTarget = profitRaw.trim() !== '';
         calc.desiredProfitPerUnit = calc.useProfitTarget ? Number(profitRaw) || 0 : 0;
         calc.desiredNetReceivePerUnit = num('net-receive');
+        calc.retailUnitPrice = num('sell-price');
         fee.commissionRate = num('commission') / 100;
         fee.paymentFeeRate = num('payment') / 100;
         fee.voucherXtraRate = num('voucher-xtra') / 100;
@@ -114,6 +135,8 @@ export class PricingPopup {
           <td class="tier-price" id="tier-${i}-computed">—</td>
         </tr>`)
             .join('');
+        const sellActive = this.activeTab === 'sell';
+        const receiveActive = this.activeTab === 'receive';
         this.shadow.innerHTML = `
       <style>${POPUP_STYLES}</style>
       <div class="pricing-popup" role="dialog" aria-label="Tính giá">
@@ -121,19 +144,48 @@ export class PricingPopup {
           <span class="title">Tính giá</span>
           <button type="button" class="btn-close" id="close-btn" title="Đóng">×</button>
         </header>
+        <nav class="tab-bar" role="tablist">
+          <button type="button" class="tab-btn${sellActive ? ' active' : ''}" role="tab" data-tab="sell" aria-selected="${sellActive}">
+            Tính giá bán
+          </button>
+          <button type="button" class="tab-btn${receiveActive ? ' active' : ''}" role="tab" data-tab="receive" aria-selected="${receiveActive}">
+            Tính giá thực nhận
+          </button>
+        </nav>
         <div class="popup-body">
-          <section class="section">
-            <h3>Sản phẩm</h3>
-            <label class="field"><span>Giá vốn (đ/sp)</span>
-              <input type="number" id="cost" min="0" step="100" value="${c.costPerUnit}" /></label>
-            <label class="field"><span>Lợi nhuận mong muốn (đ/sp)</span>
-              <input type="number" id="profit" min="0" step="1000" value="${c.useProfitTarget ? (c.desiredProfitPerUnit || '') : ''}" placeholder="Tuỳ chọn" /></label>
-            <label class="field"><span>Giá muốn nhận về (đ/sp)</span>
-              <input type="number" id="net-receive" min="0" step="1000" value="${c.desiredNetReceivePerUnit || ''}" placeholder="Khi không nhập lợi nhuận" /></label>
-            <p class="field-hint">Nhận về = tiền về sau phí sàn (chưa trừ vốn). Ship do sàn tự chọn — không nhập.</p>
-          </section>
-          <section class="section results retail-box" id="retail-results"></section>
-          <section class="section">
+          <div class="tab-panel" data-panel="sell"${sellActive ? '' : ' hidden'}>
+            <section class="section">
+              <h3>Sản phẩm</h3>
+              <label class="field"><span>Giá vốn (đ/sp)</span>
+                <input type="number" id="cost" min="0" step="100" value="${c.costPerUnit}" /></label>
+              <label class="field"><span>Lợi nhuận mong muốn (đ/sp)</span>
+                <input type="number" id="profit" min="0" step="1000" value="${c.useProfitTarget ? (c.desiredProfitPerUnit || '') : ''}" placeholder="Tuỳ chọn" /></label>
+              <label class="field"><span>Giá muốn nhận về (đ/sp)</span>
+                <input type="number" id="net-receive" min="0" step="1000" value="${c.desiredNetReceivePerUnit || ''}" placeholder="Khi không nhập lợi nhuận" /></label>
+              <p class="field-hint">Nhận về = tiền về sau phí sàn (chưa trừ vốn). Ship do sàn tự chọn — không nhập.</p>
+            </section>
+            <section class="section results retail-box" id="retail-results"></section>
+            <section class="section">
+              <h3>Giá buôn theo số lượng</h3>
+              <table class="tier-table">
+                <thead><tr><th></th><th>Min SL</th><th>Max SL</th><th>Giá đề xuất/sp</th></tr></thead>
+                <tbody>${tierRows}</tbody>
+              </table>
+              <div id="tier-results" class="tier-results"></div>
+            </section>
+          </div>
+          <div class="tab-panel" data-panel="receive"${receiveActive ? '' : ' hidden'}>
+            <section class="section">
+              <h3>Giá đang bán</h3>
+              <label class="field"><span>Giá bán hiện tại (đ/sp)</span>
+                <input type="number" id="sell-price" min="0" step="100" value="${c.retailUnitPrice || ''}" placeholder="VD: 25000" /></label>
+              <label class="field"><span>Giá vốn (đ/sp)</span>
+                <input type="number" id="cost-receive" min="0" step="100" value="${c.costPerUnit}" /></label>
+              <p class="field-hint">Nhập giá đang niêm yết — extension tính tiền thực nhận sau phí sàn (cùng công thức đối soát đơn).</p>
+            </section>
+            <section class="section results receive-box" id="receive-results"></section>
+          </div>
+          <section class="section fees-shared">
             <h3>Phí sàn Shopee (cùng công thức đối soát đơn)</h3>
             ${catHint}
             <div class="fee-grid">
@@ -154,14 +206,6 @@ export class PricingPopup {
               <label class="field"><span>Thuế TNCN % (tiền hàng)</span>
                 <input type="number" id="pit" min="0" max="100" step="0.1" value="${((f.pitRate ?? 0) * 100).toFixed(2)}" /></label>
             </div>
-          </section>
-          <section class="section">
-            <h3>Giá buôn theo số lượng</h3>
-            <table class="tier-table">
-              <thead><tr><th></th><th>Min SL</th><th>Max SL</th><th>Giá đề xuất/sp</th></tr></thead>
-              <tbody>${tierRows}</tbody>
-            </table>
-            <div id="tier-results" class="tier-results"></div>
           </section>
         </div>
       </div>
@@ -207,6 +251,43 @@ export class PricingPopup {
             el.addEventListener('input', onInput);
             el.addEventListener('change', onInput);
         });
+        const syncCostFields = (sourceId, targetId) => {
+            const src = this.shadow.getElementById(sourceId);
+            const tgt = this.shadow.getElementById(targetId);
+            if (!src || !tgt)
+                return;
+            src.addEventListener('input', () => {
+                tgt.value = src.value;
+            });
+        };
+        syncCostFields('cost', 'cost-receive');
+        syncCostFields('cost-receive', 'cost');
+        this.shadow.querySelectorAll('[data-tab]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                if (tab !== 'sell' && tab !== 'receive' || tab === this.activeTab)
+                    return;
+                this.readForm();
+                this.activeTab = tab;
+                const cost = this.settings?.pricingCalculator.costPerUnit ?? 0;
+                const costSellEl = this.shadow.getElementById('cost');
+                const costRecvEl = this.shadow.getElementById('cost-receive');
+                if (costSellEl)
+                    costSellEl.value = String(cost);
+                if (costRecvEl)
+                    costRecvEl.value = String(cost);
+                this.shadow
+                    .querySelectorAll('[data-tab]')
+                    .forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+                this.shadow.querySelectorAll('[data-tab]').forEach((b) => {
+                    b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false');
+                });
+                this.shadow.querySelectorAll('[data-panel]').forEach((panel) => {
+                    panel.hidden = panel.dataset.panel !== tab;
+                });
+                this.updateResults();
+            });
+        });
     }
     onCommissionFromPage = (ev) => {
         const rate = ev.detail?.rate;
@@ -228,9 +309,47 @@ export class PricingPopup {
     formatSettlementHint(s) {
         return `Phụ phí ${formatVnd(s.platformFeesTotal)} · Thuế ${formatVnd(s.taxTotal)} · Thu nhập ${formatVnd(s.sellerIncome)}`;
     }
+    updateReceiveResults() {
+        if (!this.settings)
+            return;
+        const c = this.settings.pricingCalculator;
+        const f = this.settings.platformFeeConfig;
+        const receiveEl = this.shadow.getElementById('receive-results');
+        if (!receiveEl)
+            return;
+        const price = c.retailUnitPrice ?? 0;
+        if (!price || price <= 0) {
+            receiveEl.innerHTML =
+                '<p class="error">Nhập giá bán hiện tại (đ/sp).</p>';
+            return;
+        }
+        const ev = evaluateOrderProfit({
+            quantity: 1,
+            unitPrice: price,
+            costPerUnit: c.costPerUnit,
+            feeConfig: f,
+        });
+        const s = ev.settlement;
+        const netPerUnit = Math.round(ev.sellerIncome);
+        const profitPerUnit = Math.round(ev.profitPerUnit);
+        const profitLine =
+            c.costPerUnit > 0
+                ? `<p class="ok">Lãi sau trừ vốn: <strong>${formatVnd(profitPerUnit)}/sp</strong></p>`
+                : '<p class="muted">Nhập giá vốn để xem lãi sau trừ vốn.</p>';
+        receiveEl.innerHTML = `
+          <h3>Thực nhận (1 SP)</h3>
+          <p class="receive-price">${formatVnd(netPerUnit)}</p>
+          <p class="muted">Giá bán ${formatVnd(price)} · ${this.formatSettlementHint(s)}</p>
+          ${profitLine}
+        `;
+    }
     updateResults() {
         if (!this.settings)
             return;
+        if (this.activeTab === 'receive') {
+            this.updateReceiveResults();
+            return;
+        }
         const c = this.settings.pricingCalculator;
         const f = this.settings.platformFeeConfig;
         const target = resolvePricingTarget(c);
@@ -340,6 +459,32 @@ const POPUP_STYLES = `
     color: #fff;
     border-radius: 12px 12px 0 0;
   }
+  .tab-bar {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 9px 8px;
+    border: none;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    line-height: 1.3;
+  }
+  .tab-btn:hover { color: #374151; background: #f3f4f6; }
+  .tab-btn.active {
+    color: #ee4d2d;
+    background: #fff;
+    border-bottom-color: #ee4d2d;
+  }
+  .tab-panel[hidden] { display: none; }
+  .fees-shared { margin-top: 4px; padding-top: 12px; border-top: 1px dashed #e5e7eb; }
   .title { font-weight: 700; font-size: 14px; }
   .btn-close {
     background: transparent;
@@ -445,11 +590,24 @@ const POPUP_STYLES = `
     padding: 12px;
   }
   .retail-box h3 { margin: 0 0 6px; font-size: 12px; color: #065f46; }
+  .receive-box {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .receive-box h3 { margin: 0 0 6px; font-size: 12px; color: #1e40af; }
   .retail-price {
     margin: 0 0 8px;
     font-size: 22px;
     font-weight: 800;
     color: #047857;
+  }
+  .receive-price {
+    margin: 0 0 8px;
+    font-size: 22px;
+    font-weight: 800;
+    color: #1d4ed8;
   }
   .highlight { color: #047857; font-weight: 600; margin: 0 0 6px; }
   .ok { color: #047857; font-weight: 600; }

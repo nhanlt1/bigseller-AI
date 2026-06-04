@@ -1,3 +1,12 @@
+import {
+    isExtensionContextAlive,
+    isExtensionContextInvalidated,
+    notifyExtensionReloadNeeded,
+} from './extension-context.js';
+
+export const EXTENSION_RELOAD_MESSAGE =
+    'Extension đã Reload — F5 trang này rồi thử lại.';
+
 export const MessageType = {
     OPEN_GEMINI_TAB: 'OPEN_GEMINI_TAB',
     REWRITE_PRODUCT: 'REWRITE_PRODUCT',
@@ -34,15 +43,35 @@ export function replyAsync(sendResponse, work) {
     return true;
 }
 export function sendMessage(message) {
+    if (!isExtensionContextAlive()) {
+        notifyExtensionReloadNeeded();
+        return Promise.reject(new Error(EXTENSION_RELOAD_MESSAGE));
+    }
     return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (response) => {
-            const err = chrome.runtime.lastError;
-            if (err) {
-                reject(new Error(err.message));
+        try {
+            chrome.runtime.sendMessage(message, (response) => {
+                const err = chrome.runtime.lastError;
+                if (err) {
+                    const error = new Error(err.message);
+                    if (isExtensionContextInvalidated(error)) {
+                        notifyExtensionReloadNeeded();
+                        reject(new Error(EXTENSION_RELOAD_MESSAGE));
+                        return;
+                    }
+                    reject(error);
+                    return;
+                }
+                resolve(response);
+            });
+        }
+        catch (err) {
+            if (isExtensionContextInvalidated(err)) {
+                notifyExtensionReloadNeeded();
+                reject(new Error(EXTENSION_RELOAD_MESSAGE));
                 return;
             }
-            resolve(response);
-        });
+            reject(err instanceof Error ? err : new Error(String(err)));
+        }
     });
 }
 export function sendTabMessage(tabId, message) {

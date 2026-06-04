@@ -1,5 +1,10 @@
 import { DEFAULT_PRICING_VARIABLES } from '../pricing/default-variables.js';
 import { DEFAULT_SHOPEE_FEE_CONFIG } from '../pricing/platform-fee-config.js';
+import {
+    isExtensionContextAlive,
+    isExtensionContextInvalidated,
+    notifyExtensionReloadNeeded,
+} from './extension-context.js';
 export const STORAGE_KEYS = {
     settings: 'bigseller_ai_settings',
     /** Mã băm phản hồi Gemini hoàn tất gần nhất — so sánh lần rewrite tiếp theo */
@@ -33,6 +38,7 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 ĐẦU RA BẮT BUỘC (chỉ JSON, không markdown, không giải thích trước/sau):
 - Trả về đúng một object JSON hợp lệ UTF-8.
 - Không dùng \`\`\`json hay văn bản ngoài JSON.
+- Bước 1 (tìm từ khóa vàng, nỗi đau, danh sách cụm từ): chỉ làm nội bộ trước khi viết — KHÔNG ghi các bước đó, bảng phân tích, hay danh sách từ khóa vàng vào JSON hay trước/sau JSON.
 - Schema:
   {"title": string, "description": string}
 - title: tối đa 120 ký tự (tiêu đề Shopee).
@@ -52,7 +58,8 @@ export const DEFAULT_PROMPT_TEMPLATE = `Bạn là chuyên gia SEO Shopee Việt 
 
 ${SHOP_NAME_PROMPT_BLOCK}
 
-=== BƯỚC 1 — TÌM TỪ KHÓA VÀNG (làm trước khi viết tiêu đề/mô tả) ===
+=== BƯỚC 1 — TÌM TỪ KHÓA VÀNG (làm trước khi viết tiêu đề/mô tả; không xuất ra JSON) ===
+Làm bước này trong suy nghĩ — chỉ đưa kết quả (từ khóa đã chọn) vào title/description; không liệt kê nỗi đau, bước 1–4, hay bảng từ khóa vàng trong đầu ra.
 1) Xác định người mua chính và NỖI ĐAU / lo lắng / mong muốn khi mua loại sản phẩm này (đọc kỹ tiêu đề + mô tả gốc).
    Ví dụ nỗi đau: con viết xấu, sai thế ngón tay, hay đau tay, hao pin, da dầu mụn, quần áo bị lem màu…
 2) Chuyển mỗi nỗi đau thành 1–3 CỤM TỪ KHÓA mà nhiều khách sẽ gõ trên Shopee (tiếng Việt có dấu, 2–5 từ/cụm).
@@ -115,9 +122,7 @@ export const DEFAULT_SETTINGS = {
     },
     platformFeeConfig: { ...DEFAULT_SHOPEE_FEE_CONFIG },
 };
-export async function getSettings() {
-    const result = await chrome.storage.sync.get(STORAGE_KEYS.settings);
-    const stored = result[STORAGE_KEYS.settings];
+function mergeStoredSettings(stored) {
     const storedTemplate = stored?.promptTemplate?.trim() ?? '';
     const promptTemplate =
         storedTemplate && storedTemplate.includes('{shopName}')
@@ -146,11 +151,42 @@ export async function getSettings() {
         },
     };
 }
+
+export async function getSettings() {
+    if (!isExtensionContextAlive()) {
+        notifyExtensionReloadNeeded();
+        return mergeStoredSettings(undefined);
+    }
+    try {
+        const result = await chrome.storage.sync.get(STORAGE_KEYS.settings);
+        return mergeStoredSettings(result[STORAGE_KEYS.settings]);
+    }
+    catch (err) {
+        if (isExtensionContextInvalidated(err)) {
+            notifyExtensionReloadNeeded();
+            return mergeStoredSettings(undefined);
+        }
+        throw err;
+    }
+}
 export async function saveSettings(partial) {
-    const current = await getSettings();
-    await chrome.storage.sync.set({
-        [STORAGE_KEYS.settings]: { ...current, ...partial },
-    });
+    if (!isExtensionContextAlive()) {
+        notifyExtensionReloadNeeded();
+        return;
+    }
+    try {
+        const current = await getSettings();
+        await chrome.storage.sync.set({
+            [STORAGE_KEYS.settings]: { ...current, ...partial },
+        });
+    }
+    catch (err) {
+        if (isExtensionContextInvalidated(err)) {
+            notifyExtensionReloadNeeded();
+            return;
+        }
+        throw err;
+    }
 }
 function ensureShopBlockInTemplate(template) {
     if (template.includes('{shopName}'))
