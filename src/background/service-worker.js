@@ -2,6 +2,7 @@ import { openChatGPTWithImagePrompt } from './chatgpt-tab.js';
 import { ensureTabReady, sendTabMessageReady } from './tab-messenger.js';
 import { withServiceWorkerKeepalive } from './keepalive.js';
 import { MessageType, replyAsync, safeSendResponse, sendTabMessage, } from '../shared/messaging.js';
+import { sanitizeRewrittenProduct } from '../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../shared/storage.js';
 const GEMINI_URL = 'https://gemini.google.com/app';
 function createRequestId() {
@@ -103,15 +104,16 @@ async function handleRewriteProduct(payload, senderTabId) {
                 error: 'Gemini không trả về JSON {title, description} hợp lệ',
             };
         }
+        const data = sanitizeRewrittenProduct(parsed, payload.shopName ?? '');
         if (senderTabId != null) {
             try {
-                await applyToSellerTab(senderTabId, parsed);
+                await applyToSellerTab(senderTabId, data);
             }
             catch {
                 /* panel vẫn hiển thị preview */
             }
         }
-        return { requestId, ok: true, data: parsed };
+        return { requestId, ok: true, data };
     }
     catch (err) {
         return {

@@ -9,7 +9,8 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const input = path.join(root, '.firecrawl', 'shopee-fee-pdf.md');
-const output = path.join(root, 'src', 'pricing', 'data', 'shopee-category-fees.json');
+const outputJson = path.join(root, 'src', 'pricing', 'data', 'shopee-category-fees.json');
+const outputJs = path.join(root, 'src', 'pricing', 'data', 'shopee-category-fees.data.js');
 
 const md = fs.readFileSync(input, 'utf8');
 const rows = [];
@@ -62,10 +63,8 @@ const meta = {
     rowCount: rows.length,
 };
 
-fs.mkdirSync(path.dirname(output), { recursive: true });
-fs.writeFileSync(
-    output,
-    JSON.stringify({ meta, rows, l1Fallbacks }, null, 0),
-    'utf8',
-);
-console.log(`Wrote ${rows.length} rows → ${output}`);
+const payload = { meta, rows, l1Fallbacks };
+fs.mkdirSync(path.dirname(outputJson), { recursive: true });
+fs.writeFileSync(outputJson, JSON.stringify(payload, null, 0), 'utf8');
+fs.writeFileSync(outputJs, `export default ${JSON.stringify(payload)};\n`, 'utf8');
+console.log(`Wrote ${rows.length} rows → ${outputJson} + ${outputJs}`);

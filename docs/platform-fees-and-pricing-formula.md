@@ -83,7 +83,7 @@ Nguồn: [Cập nhật phí seller thường 23/05/2026](https://banhang.shopee.
 
 Ví dụ **Sở thích & Sưu tầm > Quà Lưu Niệm > Móc khóa**: **16%** (từ 23/05/2026; trước đó khoảng 13–14%).
 
-Extension đọc `.product-category-text`, hiển thị **Phí cố định: 16%** (đỏ) cạnh danh mục và tự điền % vào popup **$** / `platformFeeConfig.commissionRate`.
+Extension đọc danh mục trên **Shopee** (`.product-category-text`) hoặc **BigSeller** (cascade `ant-select` trong `.page_edit_item`), hiển thị **Phí cố định: …%** (đỏ) cạnh danh mục và tự điền % vào popup **$** / `platformFeeConfig.commissionRate`. BigSeller chỉ hiện tên lá (vd `Bút Chì`) vẫn tra được qua so khớp mờ với biểu phí.
 
 Tái tạo JSON: `node scripts/parse-shopee-category-fees.mjs` (sau khi cập nhật `.firecrawl/shopee-fee-pdf.md`).
 

@@ -1,5 +1,5 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
-import { buildPromptProductContext } from '../../shared/shop-names.js';
+import { buildPromptProductContext, sanitizeRewrittenProduct, } from '../../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../../shared/storage.js';
 const PANEL_HOST_ID = 'bigseller-ai-panel-host';
 /** Hàng nút tròn góc phải — đồng bộ với image-fab */
@@ -132,10 +132,11 @@ export class FloatingPanel {
             if (!result.ok || !result.data) {
                 throw new Error(result.error ?? 'Gemini không trả về kết quả');
             }
-            this.lastResult = result.data;
-            this.titlePreviewEl.textContent = result.data.title || '—';
-            this.descPreviewEl.textContent = result.data.description || '—';
-            const ok = this.adapter.apply(result.data);
+            const data = sanitizeRewrittenProduct(result.data, ctx.shopName);
+            this.lastResult = data;
+            this.titlePreviewEl.textContent = data.title || '—';
+            this.descPreviewEl.textContent = data.description || '—';
+            const ok = this.adapter.apply(data);
             this.setState(ok ? 'done' : 'error', ok
                 ? 'Đã viết lại và áp dụng vào form'
                 : 'Có JSON nhưng không điền được form — kiểm tra trang');
@@ -192,15 +193,17 @@ export class FloatingPanel {
         }
         this.setState('busy', 'Đang áp dụng…');
         try {
+            const ctx = this.promptContextFromPage();
             const raw = await navigator.clipboard.readText();
             const parsed = parseGeminiProductJson(raw.trim());
             if (!parsed) {
                 throw new Error('Clipboard không có JSON {"title":"...","description":"..."} — copy lại phản hồi từ Gemini');
             }
-            this.lastResult = parsed;
-            this.titlePreviewEl.textContent = parsed.title || '—';
-            this.descPreviewEl.textContent = parsed.description || '—';
-            const ok = this.adapter.apply(parsed);
+            const data = sanitizeRewrittenProduct(parsed, ctx?.shopName ?? '');
+            this.lastResult = data;
+            this.titlePreviewEl.textContent = data.title || '—';
+            this.descPreviewEl.textContent = data.description || '—';
+            const ok = this.adapter.apply(data);
             this.setState(ok ? 'done' : 'error', ok
                 ? 'Đã áp dụng vào form'
                 : 'Parse OK nhưng không điền được form — kiểm tra trang sản phẩm');

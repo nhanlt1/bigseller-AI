@@ -1,7 +1,7 @@
 import {
     formatCommissionPercent,
     lookupCategoryCommission,
-    readShopeeProductCategoryPath,
+    readProductCategoryPath,
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
 import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
@@ -31,6 +31,7 @@ export class PricingPopup {
     toggle() {
         this.visible = !this.visible;
         this.host.style.display = this.visible ? 'block' : 'none';
+        this.host.dataset.open = this.visible ? 'true' : 'false';
         if (this.visible)
             void this.loadAndRender();
     }
@@ -44,7 +45,7 @@ export class PricingPopup {
     applyCategoryCommissionFromPage() {
         if (!this.settings)
             return null;
-        const path = readShopeeProductCategoryPath();
+        const path = readProductCategoryPath();
         if (!path)
             return null;
         const lookup = lookupCategoryCommission(path);
@@ -195,6 +196,7 @@ export class PricingPopup {
         this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
             this.visible = false;
             this.host.style.display = 'none';
+            this.host.dataset.open = 'false';
         });
         const onInput = () => {
             this.readForm();
@@ -313,12 +315,15 @@ const POPUP_STYLES = `
     font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     font-size: 13px;
     pointer-events: none;
+    max-height: min(85vh, 720px);
   }
   :host([data-open="true"]) { pointer-events: auto; }
   .pricing-popup {
+    display: flex;
+    flex-direction: column;
     width: min(400px, calc(100vw - 32px));
-    max-height: min(85vh, 640px);
-    overflow: auto;
+    max-height: min(85vh, 720px);
+    overflow: hidden;
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0,0,0,.18);
@@ -329,12 +334,11 @@ const POPUP_STYLES = `
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
     padding: 10px 14px;
     background: linear-gradient(135deg, #ee4d2d, #ff7337);
     color: #fff;
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    border-radius: 12px 12px 0 0;
   }
   .title { font-weight: 700; font-size: 14px; }
   .btn-close {
@@ -346,7 +350,22 @@ const POPUP_STYLES = `
     line-height: 1;
     padding: 0 4px;
   }
-  .popup-body { padding: 12px 14px; }
+  .popup-body {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 14px;
+    scrollbar-gutter: stable;
+  }
+  .popup-body::-webkit-scrollbar { width: 8px; }
+  .popup-body::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 4px;
+  }
+  .popup-body::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
   .section { margin-bottom: 14px; }
   .section h3 {
     margin: 0 0 8px;

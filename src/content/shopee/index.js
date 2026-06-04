@@ -5,7 +5,7 @@ import { FloatingPanel, mountToggleButton } from '../shared/panel.js';
 import { mountPricingFab } from '../shared/pricing-popup.js';
 import { observeDomChanges } from '../shared/dom-utils.js';
 import { isShopeeOrderDetailUrl, mountOrderDetailCheck } from './order-detail-check.js';
-import { mountProductCategoryFeeBadge, updateProductCategoryFeeBadge, } from './product-category-fee.js';
+import { mountProductCategoryFeeBadge, updateProductCategoryFeeBadge, } from '../shared/product-category-fee.js';
 import { isShopeePricingHost, isShopeeSellerCenterHost } from './shopee-host.js';
 
 listenForProductApply(shopeeAdapter);

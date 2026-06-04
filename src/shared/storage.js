@@ -39,12 +39,18 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 - description: tối đa 3000 ký tự, xuống dòng trong chuỗi dùng \\n.
 - Không dùng dấu nháy kép \`"\` bên trong title/description (dùng nháy đơn hoặc viết không dấu); mọi \`"\` trong chuỗi phải escape thành \`\\"\`.
 - Ví dụ đúng: {"title":"Áo thun nam form rộng","description":"Chất cotton...\\nSize S-XL"}`;
+/** Luôn ghép vào prompt (kể cả template cũ trong storage chưa có {shopName}) */
+export const SHOP_NAME_PROMPT_BLOCK = `=== GIAN HÀNG (bắt buộc trong mô tả) ===
+Tên gian hàng duy nhất được phép nhắc trong mô tả mới: {shopName}
+- PHẢI viết lại tiêu đề và mô tả (không copy nguyên văn bản gốc).
+- PHẢI nhắc đúng tên gian hàng trên ít nhất một lần (mở đầu hoặc phần 🛡️ Cam kết), viết tự nhiên.
+- Cấm mọi tên shop/gian hàng khác (vd HAN.X, HAN.X - SHOP BÁCH HOÁ, tên shop cũ trong cam kết). Phần cam kết PHẢI viết lại chỉ nhắc {shopName}.
+- Mô tả gốc đã gỡ tên shop lạ; không thêm tên cửa hàng nào khác ngoài {shopName}.
+- Nếu không có tên gian hàng: không chèn tên shop vào mô tả.`;
+
 export const DEFAULT_PROMPT_TEMPLATE = `Bạn là chuyên gia SEO Shopee Việt Nam. Viết lại tiêu đề và mô tả bằng tiếng {language} từ nội dung gốc bên dưới. Chỉ dùng thông tin có trong bản gốc hoặc suy ra hợp lý từ ngành hàng; không bịa thương hiệu, thông số, cam kết.
 
-=== GIAN HÀNG (bắt buộc trong mô tả) ===
-Tên gian hàng duy nhất được phép nhắc trong mô tả mới: {shopName}
-- Mô tả gốc đã được gỡ mọi tên gian hàng / shop khác; không thêm tên cửa hàng, thương hiệu shop hay tag shop nào khác ngoài tên trên.
-- Nếu {shopName} trống: không chèn tên gian hàng vào mô tả.
+${SHOP_NAME_PROMPT_BLOCK}
 
 === BƯỚC 1 — TÌM TỪ KHÓA VÀNG (làm trước khi viết tiêu đề/mô tả) ===
 1) Xác định người mua chính và NỖI ĐAU / lo lắng / mong muốn khi mua loại sản phẩm này (đọc kỹ tiêu đề + mô tả gốc).
@@ -64,10 +70,10 @@ Công thức: [Loại SP ngắn] + [Từ khóa vàng từ bước 1] + [Đặc t
 
 === MÔ TẢ SHOPEE (tối đa 3000 ký tự, text thuần) ===
 Cấu trúc 4 phần, xuống dòng rõ (dùng \\n trong JSON):
-1) Mở đầu ngắn: nêu nỗi đau khách hàng + cách sản phẩm giải quyết; lồng từ khóa vàng (bước 1).
+1) Mở đầu ngắn: nêu nỗi đau khách hàng + cách sản phẩm giải quyết; lồng từ khóa vàng (bước 1); nhắc tên gian hàng {shopName} nếu có.
 2) Thông số: chất liệu, kích thước, xuất xứ, màu/size, hạn dùng… (bullet "- ").
 3) Hướng dẫn dùng + bảo quản.
-4) Cam kết/bảo hành/đổi trả (chỉ nếu bản gốc có).
+4) Cam kết/bảo hành/đổi trả (chỉ nếu bản gốc có): viết lại, chỉ nhắc {shopName}, không giữ tên shop cũ.
 - Emoji (chỉ trong mô tả, không dùng trong tiêu đề): thêm emoji phù hợp ngành hàng để dễ đọc trên điện thoại.
   • Đặt 1 emoji đầu mỗi phần / tiêu đề nhóm (vd ✨ mở đầu, 📋 thông số, 📖 hướng dẫn, 🛡️ cam kết).
   • Mỗi bullet quan trọng có thể thêm 1 emoji đầu dòng (✅ lợi ích, 📦 quy cách, 🎨 màu/size, ⚠️ lưu ý, 💡 mẹo dùng).
@@ -112,9 +118,15 @@ export const DEFAULT_SETTINGS = {
 export async function getSettings() {
     const result = await chrome.storage.sync.get(STORAGE_KEYS.settings);
     const stored = result[STORAGE_KEYS.settings];
+    const storedTemplate = stored?.promptTemplate?.trim() ?? '';
+    const promptTemplate =
+        storedTemplate && storedTemplate.includes('{shopName}')
+            ? storedTemplate
+            : DEFAULT_PROMPT_TEMPLATE;
     return {
         ...DEFAULT_SETTINGS,
         ...stored,
+        promptTemplate,
         pricingVariables: {
             ...DEFAULT_PRICING_VARIABLES,
             ...stored?.pricingVariables,
@@ -140,13 +152,23 @@ export async function saveSettings(partial) {
         [STORAGE_KEYS.settings]: { ...current, ...partial },
     });
 }
+function ensureShopBlockInTemplate(template) {
+    if (template.includes('{shopName}'))
+        return template;
+    return `${SHOP_NAME_PROMPT_BLOCK}\n\n${template.trim()}`;
+}
+
 export function fillPromptTemplate(template, vars) {
     const shopName = vars.shopName?.trim() ?? '';
-    const body = template
-        .replace(/\{title\}/g, vars.title)
-        .replace(/\{description\}/g, vars.description)
-        .replace(/\{language\}/g, vars.language)
-        .replace(/\{shopName\}/g, shopName || '(không có — không chèn tên gian hàng)')
+    const shopLabel =
+        shopName ||
+        '(chưa đọc được tên gian — không chèn tên shop vào mô tả)';
+    const withShop = ensureShopBlockInTemplate(template);
+    const body = withShop
+        .replace(/\{title\}/g, vars.title ?? '')
+        .replace(/\{description\}/g, vars.description ?? '')
+        .replace(/\{language\}/g, vars.language ?? 'Việt')
+        .replace(/\{shopName\}/g, shopLabel)
         .trim();
     if (body.includes('ĐẦU RA BẮT BUỘC')) {
         return body;

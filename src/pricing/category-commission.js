@@ -1,4 +1,4 @@
-import feeData from './data/shopee-category-fees.json' with { type: 'json' };
+import feeData from './data/shopee-category-fees.data.js';
 
 /** Sửa lỗi OCR phổ biến từ PDF biểu phí Shopee */
 const OCR_TOKEN_FIXES = [
@@ -132,6 +132,30 @@ function lookupL1Fallback(parts) {
     return null;
 }
 
+/** BigSeller thường chỉ hiện tên lá (vd "Bút Chì") — so khớp cat2/cat3 trong biểu phí */
+function lookupLeafFuzzy(parts) {
+    const leaf = parts[parts.length - 1]?.trim() ?? '';
+    if (!leaf)
+        return null;
+    let best = null;
+    for (const row of feeData.rows) {
+        for (const field of [row.cat3, row.cat2].filter(Boolean)) {
+            const sim = similarity(leaf, field);
+            if (sim < FUZZY_MIN)
+                continue;
+            if (!best || sim > best.score) {
+                best = {
+                    rate: row.rate,
+                    ratePct: row.ratePct,
+                    stt: row.stt,
+                    score: sim,
+                };
+            }
+        }
+    }
+    return best;
+}
+
 /**
  * @param {string} categoryPath — ví dụ "Sở thích & Sưu tầm > Quà Lưu Niệm > Móc khóa"
  */
@@ -166,11 +190,40 @@ export function lookupCategoryCommission(categoryPath) {
             score: fuzzy.score,
         };
     }
+    const leaf = lookupLeafFuzzy(parts);
+    if (leaf) {
+        return {
+            raw,
+            parts,
+            rate: leaf.rate,
+            ratePct: leaf.ratePct,
+            match: 'leaf-fuzzy',
+            stt: leaf.stt,
+            score: leaf.score,
+        };
+    }
     const fb = lookupL1Fallback(parts);
     if (fb) {
         return { raw, parts, rate: fb.rate, ratePct: fb.ratePct, match: fb.match };
     }
     return { raw, parts, rate: null, ratePct: null, match: 'none' };
+}
+
+const CATEGORY_SELECT_SKIP = /^(chọn|select|tất cả|all|--|-)$/i;
+
+function readAntSelectParts(container) {
+    const seen = new Set();
+    const parts = [];
+    for (const el of container.querySelectorAll(
+        '.ant-select-selection__rendered, .ant-select-selection-selected-value',
+    )) {
+        const t = el.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        if (!t || CATEGORY_SELECT_SKIP.test(t) || seen.has(t))
+            continue;
+        seen.add(t);
+        parts.push(t);
+    }
+    return parts;
 }
 
 /** Đọc danh mục trên form sản phẩm Shopee Seller Center */
@@ -180,6 +233,77 @@ export function readShopeeProductCategoryPath(root = document) {
         root.querySelector('.product-category-box-inner');
     const text = el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     return text.includes('>') ? text : '';
+}
+
+/**
+ * Dòng danh mục SP BigSeller: `page_edit_item` thứ 3 (index 2) trong form card đầu.
+ * DOM: `.com_card.mb_20` → `form.ant-form-inline` → `.page_edit_item[2]` → `.ant-select-selection--single`
+ */
+export function getBigsellerCategoryFormItem(root = document) {
+    const cardBody =
+        root.querySelector('.page_edit .com_card.mb_20 .com_card_body') ??
+        root.querySelector('.page_edit .com_card .com_card_body');
+    const form =
+        cardBody?.querySelector('form.ant-form-inline') ??
+        cardBody?.querySelector('form.ant-form');
+    if (!form)
+        return null;
+    const items = form.querySelectorAll('.page_edit_item');
+    return items[2] ?? null;
+}
+
+/** Ô combobox danh mục (300px) — anchor badge phí cố định */
+export function getBigsellerCategorySelectionEl(root = document) {
+    const item = getBigsellerCategoryFormItem(root);
+    if (!item)
+        return null;
+    return (
+        item.querySelector(
+            '.ant-select-selection.ant-select-selection--single[role="combobox"]',
+        ) ??
+        item.querySelector('.w_300.ant-select .ant-select-selection--single') ??
+        item.querySelector('.ant-select-selection--single')
+    );
+}
+
+/** Đọc danh mục trên form sửa SP BigSeller */
+export function readBigsellerProductCategoryPath(root = document) {
+    const item = getBigsellerCategoryFormItem(root);
+    if (item) {
+        const parts = readAntSelectParts(item);
+        if (parts.length)
+            return parts.join(' > ');
+        const combo = getBigsellerCategorySelectionEl(root);
+        const leaf = combo?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        if (leaf && !CATEGORY_SELECT_SKIP.test(leaf))
+            return leaf;
+    }
+    const items = root.querySelectorAll(
+        '.page_edit .com_card_body .page_edit_item, .page_edit .page_edit_item',
+    );
+    let bestParts = [];
+    for (const el of items) {
+        const parts = readAntSelectParts(el);
+        if (!parts.length)
+            continue;
+        const label =
+            el.querySelector('.ant-form-item-label, label')?.textContent ?? '';
+        if (/danh\s*mục|ngành\s*hàng|category/i.test(label))
+            return parts.join(' > ');
+        if (parts.length >= 2 && parts.length >= bestParts.length)
+            bestParts = parts;
+    }
+    if (bestParts.length)
+        return bestParts.join(' > ');
+    return '';
+}
+
+/** Shopee hoặc BigSeller — dùng cho popup $ và badge phí */
+export function readProductCategoryPath(root = document) {
+    return (
+        readShopeeProductCategoryPath(root) ||
+        readBigsellerProductCategoryPath(root)
+    );
 }
 
 export function formatCommissionPercent(rate) {
