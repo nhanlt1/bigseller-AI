@@ -50,7 +50,8 @@
         "src/content/*/*.js",
         "src/content/shared/*.js",
         "src/shared/*.js",
-        "src/pricing/*.js"
+        "src/pricing/*.js",
+        "src/pricing/data/*.json"
       ],
       "matches": ["<all_urls>"]
     }

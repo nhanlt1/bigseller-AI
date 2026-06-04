@@ -35,13 +35,17 @@ Cập nhật tham chiếu: 06/2026. Tra [Học viện Shopee](https://banhang.sh
 
 ---
 
-## 5. Đối soát doanh thu đơn Shopee
+## 5. Đối soát doanh thu đơn Shopee (trang chi tiết đơn)
+
+**Voucher Xtra** (từ 23/05/2026): **5,5% giá trị mỗi sản phẩm**, tối đa **50.000đ/SP** — tính trên đơn giao thành công ([TukiGroup](https://tukigroup.vn/quan-trong-cap-nhat-ve-phi-danh-cho-nguoi-ban-thuoc-shopee-mall-tu-ngay-29-05-2026/), [Effitrack](https://effitrack.me/phi-san-shopee-2026-cap-nhat-moi-nhat-anh-huong/)).
 
 ```text
-netBase = giá đơn − voucher shop (seller)
-platformFees = netBase × (phí cố định% + phí GD% + voucher Xtra% nếu có) + 3.000đ (+ PiShip nếu có)
-doanh thu = giá đơn − voucher shop − platformFees
+Phụ phí = phí cố định%×tiền hàng + (3.000đ + Voucher Xtra) + phí GD%×(tiền hàng + phí ship khách)
+Thuế = 1% GTGT×tiền hàng + 0,5% TNCN×tiền hàng
+Thu nhập = tiền hàng + seller chịu ship − Phụ phí − Thuế
 ```
+
+Chi tiết ship/voucher trong `income-group[1]` **không** cộng vào thu nhập (chỉ lấy phí ship khách để tính phí GD).
 
 ### Đơn mẫu (đã kiểm chứng)
 
@@ -57,18 +61,30 @@ doanh thu = giá đơn − voucher shop − platformFees
 
 ---
 
-## 6. Công thức ngược — giá bán để đạt lời/sp
+## 6. Công thức ngược — giá bán (popup **$**, cùng đối soát đơn)
 
-**Lợi nhuận mong muốn = VNĐ trên mỗi sản phẩm.** Đơn `q` SP, đơn giá `p`, không voucher shop:
+**Lợi nhuận mong muốn = VNĐ/sp.** Extension tìm `p` sao cho:
 
 ```text
-pMin(q) = ( q × (giáVốn + lợiNhuận/sp) + phíCốĐịnhĐơn ) / ( q × (1 − tổng%Phí) )
+Thu nhập(p×q) = q×(vốn + lời/sp)
+Thu nhập = p×q + sellerShip − Phụ phí − Thuế
 ```
 
-Giá lẻ: `pMin(1)`.
+`Phụ phí` = phí cố định%×tiền hàng + (3.000 + Voucher Xtra) + phí GD%×(tiền hàng + phí ship khách).  
+`Thuế` = GTGT%×tiền hàng + TNCN%×tiền hàng.
 
-**Ví dụ:** vốn 6.300, lời 10.000/sp, phí 24,5% + 3.000đ → giá lẻ đề xuất **~25.563đ**. Bậc 2–5 @ 15.000đ → lời **~4.425/sp** (chưa đạt 10.000).
+Popup **$**: nhập phí ship khách/đơn (chỉ cho phí GD), seller chịu ship, % phí và thuế — giá lẻ/buôn tự cập nhật.
 
-## 7. Extension
+## 7. Phí cố định theo danh mục (trang sản phẩm)
 
-Tab tính giá: nút nổi **$** → popup (không blur nền). Logic: `src/pricing/order-profit.js`, `wholesale-tiers.js`.
+Nguồn: [Cập nhật phí seller thường 23/05/2026](https://banhang.shopee.vn/edu/article/27540) + [biểu phí PDF](https://mms.file.susercontent.com/api/v4/11195002/mms/vn-11195002-bmlg7-mo9l5o5t9kaz4f) (~1594 dòng L1–L3).
+
+Ví dụ **Sở thích & Sưu tầm > Quà Lưu Niệm > Móc khóa**: **16%** (từ 23/05/2026; trước đó khoảng 13–14%).
+
+Extension đọc `.product-category-text`, hiển thị **Phí cố định: 16%** (đỏ) cạnh danh mục và tự điền % vào popup **$** / `platformFeeConfig.commissionRate`.
+
+Tái tạo JSON: `node scripts/parse-shopee-category-fees.mjs` (sau khi cập nhật `.firecrawl/shopee-fee-pdf.md`).
+
+## 8. Extension
+
+Tab tính giá: nút nổi **$** → popup (không blur nền). Logic: `src/pricing/order-profit.js`, `category-commission.js`, `wholesale-tiers.js`.

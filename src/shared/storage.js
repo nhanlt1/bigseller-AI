@@ -80,6 +80,10 @@ export const DEFAULT_PRICING_FORMULA = '(cost * (1 + profitRate) + shippingSubsi
 export const DEFAULT_PRICING_CALCULATOR = {
     costPerUnit: 6300,
     desiredProfitPerUnit: 10000,
+    /** Phí ship khách/đơn — chỉ dùng tính phí xử lý GD (không cộng vào thu nhập) */
+    shippingBuyerPerOrder: 0,
+    /** Phần seller chịu ship (subtotal strong[1] trên đơn) */
+    sellerShippingBurdenPerOrder: 0,
     retailUnitPrice: 0,
     wholesaleTiers: [
         { qtyMin: 2, qtyMax: 5, unitPrice: 0 },

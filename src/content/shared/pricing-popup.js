@@ -1,3 +1,8 @@
+import {
+    formatCommissionPercent,
+    lookupCategoryCommission,
+    readShopeeProductCategoryPath,
+} from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
 import { evaluateOrderProfit, solveMinUnitPrice, } from '../../pricing/order-profit.js';
 import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
@@ -9,7 +14,9 @@ export class PricingPopup {
     shadow;
     visible = false;
     settings = null;
+    categoryLookup = null;
     saveTimer = null;
+    commissionListener = null;
     constructor() {
         const existing = document.getElementById(POPUP_HOST_ID);
         if (existing)
@@ -29,9 +36,23 @@ export class PricingPopup {
     }
     async loadAndRender() {
         this.settings = await getSettings();
+        this.applyCategoryCommissionFromPage();
         this.render();
         this.bindEvents();
         this.updateResults();
+    }
+    applyCategoryCommissionFromPage() {
+        if (!this.settings)
+            return null;
+        const path = readShopeeProductCategoryPath();
+        if (!path)
+            return null;
+        const lookup = lookupCategoryCommission(path);
+        if (lookup.rate == null)
+            return lookup;
+        this.settings.platformFeeConfig.commissionRate = lookup.rate;
+        this.categoryLookup = lookup;
+        return lookup;
     }
     scheduleSave() {
         if (this.saveTimer)
@@ -54,6 +75,8 @@ export class PricingPopup {
         const num = (id) => Number(this.shadow.getElementById(id)?.value) || 0;
         calc.costPerUnit = num('cost');
         calc.desiredProfitPerUnit = num('profit');
+        calc.shippingBuyerPerOrder = num('ship-buyer');
+        calc.sellerShippingBurdenPerOrder = num('ship-seller');
         fee.commissionRate = num('commission') / 100;
         fee.paymentFeeRate = num('payment') / 100;
         fee.voucherXtraRate = num('voucher-xtra') / 100;
@@ -61,6 +84,8 @@ export class PricingPopup {
             this.shadow.getElementById('use-voucher-xtra')
                 ?.checked ?? false;
         fee.infrastructureFeePerOrder = num('infra');
+        fee.vatRate = num('vat') / 100;
+        fee.pitRate = num('pit') / 100;
         fee.usePiShip =
             this.shadow.getElementById('use-piship')?.checked ??
                 false;
@@ -77,6 +102,7 @@ export class PricingPopup {
         if (!this.settings)
             return;
         const { pricingCalculator: c, platformFeeConfig: f } = this.settings;
+        const catHint = this.categoryCommissionHintHtml();
         const tierRows = c.wholesaleTiers
             .map((t, i) => `
         <tr data-tier="${i}">
@@ -100,10 +126,15 @@ export class PricingPopup {
               <input type="number" id="cost" min="0" step="100" value="${c.costPerUnit}" /></label>
             <label class="field"><span>Lợi nhuận mong muốn (đ/sp)</span>
               <input type="number" id="profit" min="0" step="1000" value="${c.desiredProfitPerUnit}" /></label>
+            <label class="field"><span>Phí ship khách/đơn (chỉ tính phí GD)</span>
+              <input type="number" id="ship-buyer" min="0" step="1000" value="${c.shippingBuyerPerOrder ?? 0}" /></label>
+            <label class="field"><span>Seller chịu ship/đơn</span>
+              <input type="number" id="ship-seller" min="0" step="1000" value="${c.sellerShippingBurdenPerOrder ?? 0}" /></label>
           </section>
           <section class="section results retail-box" id="retail-results"></section>
           <section class="section">
-            <h3>Phí sàn Shopee (% trên đơn sau voucher shop)</h3>
+            <h3>Phí sàn Shopee (cùng công thức đối soát đơn)</h3>
+            ${catHint}
             <div class="fee-grid">
               <label class="field"><span>Phí cố định %</span>
                 <input type="number" id="commission" min="0" max="100" step="0.1" value="${(f.commissionRate * 100).toFixed(2)}" /></label>
@@ -116,6 +147,12 @@ export class PricingPopup {
               Voucher Xtra <input type="number" id="voucher-xtra" min="0" max="100" step="0.1" value="${(f.voucherXtraRate * 100).toFixed(2)}" />%</label>
             <label class="check"><input type="checkbox" id="use-piship" ${f.usePiShip ? 'checked' : ''} />
               PiShip (+${f.piShipFeePerOrder}đ/đơn khi bật)</label>
+            <div class="fee-grid">
+              <label class="field"><span>Thuế GTGT % (tiền hàng)</span>
+                <input type="number" id="vat" min="0" max="100" step="0.1" value="${((f.vatRate ?? 0) * 100).toFixed(2)}" /></label>
+              <label class="field"><span>Thuế TNCN % (tiền hàng)</span>
+                <input type="number" id="pit" min="0" max="100" step="0.1" value="${((f.pitRate ?? 0) * 100).toFixed(2)}" /></label>
+            </div>
           </section>
           <section class="section">
             <h3>Giá buôn theo số lượng</h3>
@@ -129,7 +166,32 @@ export class PricingPopup {
       </div>
     `;
     }
+    categoryCommissionHintHtml() {
+        const lookup =
+            this.categoryLookup ??
+            (readShopeeProductCategoryPath()
+                ? lookupCategoryCommission(readShopeeProductCategoryPath())
+                : null);
+        if (!lookup?.raw)
+            return '';
+        const pct = formatCommissionPercent(lookup.rate);
+        if (!pct) {
+            return `<p class="cat-fee-warn">Danh mục: ${this.escapeHtml(lookup.raw)} — chưa có trong biểu phí, nhập % thủ công.</p>`;
+        }
+        return `<p class="cat-fee-auto">Danh mục SP: <strong>${this.escapeHtml(lookup.raw)}</strong> → phí cố định <strong class="fee-pct">${pct}</strong></p>`;
+    }
+    escapeHtml(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
     bindEvents() {
+        this.commissionListener?.();
+        this.commissionListener = () => {
+            window.removeEventListener('bigseller-ai:commission-rate', this.onCommissionFromPage);
+        };
+        window.addEventListener('bigseller-ai:commission-rate', this.onCommissionFromPage);
         this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
             this.visible = false;
             this.host.style.display = 'none';
@@ -144,17 +206,47 @@ export class PricingPopup {
             el.addEventListener('change', onInput);
         });
     }
+    onCommissionFromPage = (ev) => {
+        const rate = ev.detail?.rate;
+        if (rate == null || !this.settings)
+            return;
+        this.settings.platformFeeConfig.commissionRate = rate;
+        const input = this.shadow.getElementById('commission');
+        if (input)
+            input.value = (rate * 100).toFixed(2);
+        this.applyCategoryCommissionFromPage();
+        const hint = this.shadow.querySelector('.cat-fee-auto, .cat-fee-warn');
+        if (hint) {
+            const html = this.categoryCommissionHintHtml();
+            if (html)
+                hint.outerHTML = html;
+        }
+        this.updateResults();
+    };
+    orderOpts() {
+        const c = this.settings?.pricingCalculator;
+        if (!c)
+            return {};
+        return {
+            shippingBuyerForPayment: c.shippingBuyerPerOrder ?? 0,
+            sellerShippingBurden: c.sellerShippingBurdenPerOrder ?? 0,
+        };
+    }
+    formatSettlementHint(s) {
+        return `Phụ phí ${formatVnd(s.platformFeesTotal)} · Thuế ${formatVnd(s.taxTotal)} · Thu nhập ${formatVnd(s.sellerIncome)}`;
+    }
     updateResults() {
         if (!this.settings)
             return;
         const c = this.settings.pricingCalculator;
         const f = this.settings.platformFeeConfig;
-        const retailPrice = solveMinUnitPrice(1, c.costPerUnit, c.desiredProfitPerUnit, f);
+        const opts = this.orderOpts();
+        const retailPrice = solveMinUnitPrice(1, c.costPerUnit, c.desiredProfitPerUnit, f, opts);
         const retailEl = this.shadow.getElementById('retail-results');
         if (retailEl) {
             if (retailPrice == null) {
                 retailEl.innerHTML =
-                    '<p class="error">Tổng % phí ≥ 100% — giảm phí hoặc lợi nhuận mục tiêu.</p>';
+                    '<p class="error">Không tính được giá — giảm % phí hoặc lợi nhuận mục tiêu.</p>';
             }
             else {
                 const ev = evaluateOrderProfit({
@@ -162,11 +254,14 @@ export class PricingPopup {
                     unitPrice: retailPrice,
                     costPerUnit: c.costPerUnit,
                     feeConfig: f,
+                    ...opts,
                 });
+                const s = ev.settlement;
                 retailEl.innerHTML = `
           <h3>Giá bán lẻ (1 SP)</h3>
           <p class="retail-price">${formatVnd(retailPrice)}</p>
-          <p class="muted">Tự tính: (vốn + lời mục tiêu + phí cố định đơn) ÷ (1 − tổng % phí sàn)</p>
+          <p class="muted">Ngược từ: tiền hàng − Phụ phí − Thuế + seller ship = vốn + lời/sp</p>
+          <p class="muted">${this.formatSettlementHint(s)}</p>
           <p class="ok">Lời sau phí: <strong>${formatVnd(Math.round(ev.profitPerUnit))}/sp</strong> (mục tiêu ${formatVnd(c.desiredProfitPerUnit)})</p>
         `;
             }
@@ -174,7 +269,7 @@ export class PricingPopup {
         const tierEl = this.shadow.getElementById('tier-results');
         if (!tierEl)
             return;
-        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c.desiredProfitPerUnit, f);
+        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c.desiredProfitPerUnit, f, opts);
         if (evals.length === 0) {
             tierEl.innerHTML = '<p class="muted">Nhập ít nhất một bậc (min ≤ max, SL &gt; 0).</p>';
             return;
@@ -186,7 +281,7 @@ export class PricingPopup {
                 continue;
             const valid = tier.qtyMin > 0 && tier.qtyMax >= tier.qtyMin;
             const price = valid
-                ? solveMinUnitPrice(tier.qtyMin, c.costPerUnit, c.desiredProfitPerUnit, f)
+                ? solveMinUnitPrice(tier.qtyMin, c.costPerUnit, c.desiredProfitPerUnit, f, opts)
                 : null;
             cell.textContent = price != null ? formatVnd(price) : '—';
             cell.className = price != null ? 'tier-price ok' : 'tier-price';
@@ -199,7 +294,7 @@ export class PricingPopup {
             return `<div class="tier-card">
           <strong>Bậc ${e.tierIndex}</strong> (${e.qtyMin}–${e.qtyMax} SP)
           <p class="tier-price-lg">${formatVnd(e.computedUnitPrice)}<span class="per">/sp</span></p>
-          <p class="muted">Tính theo min SL bậc (phí 3.000đ chia cho ít SP nhất)</p>
+          <p class="muted">Tính theo min SL bậc · cùng công thức đối soát đơn</p>
           <p class="ok">Lời @min ${e.qtyMin} SP: <strong>${formatVnd(e.profitPerUnitAtMin)}/sp</strong>
             · @max ${e.qtyMax} SP: <strong>${formatVnd(e.profitPerUnitAtMax)}/sp</strong></p>
         </div>`;
@@ -321,6 +416,26 @@ const POPUP_STYLES = `
   .warn { color: #b45309; font-weight: 600; }
   .error { color: #b91c1c; margin: 0; }
   .muted { color: #6b7280; font-size: 11px; }
+  .cat-fee-auto {
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #7f1d1d;
+  }
+  .cat-fee-auto .fee-pct { color: #dc2626; }
+  .cat-fee-warn {
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #92400e;
+  }
 `;
 let popupInstance = null;
 export function getPricingPopup() {

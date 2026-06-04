@@ -1,35 +1,71 @@
-import { getFixedFeesPerOrder, getRateSum } from './platform-fee-config.js';
+import { computeSellerSettlement } from './order-settlement.js';
+
+export function pricingOrderOptions(input) {
+    return {
+        shippingBuyerForPayment: input.shippingBuyerForPayment ?? 0,
+        sellerShippingBurden: input.sellerShippingBurden ?? 0,
+    };
+}
+
+/** Lợi nhuận/sp sau cùng công thức đối soát đơn Shopee */
 export function evaluateOrderProfit(input) {
     const q = Math.max(1, Math.floor(input.quantity));
     const p = Math.max(0, input.unitPrice);
-    const shopVoucher = Math.max(0, input.shopVoucherTotal ?? 0);
-    const orderGross = p * q;
-    const netBase = Math.max(0, orderGross - shopVoucher);
-    const rateSum = getRateSum(input.feeConfig);
-    const fixed = getFixedFeesPerOrder(input.feeConfig);
-    const platformFees = Math.round(netBase * rateSum + fixed);
-    const revenue = orderGross - platformFees;
-    const totalProfit = revenue - input.costPerUnit * q;
-    const profitPerUnit = totalProfit / q;
+    const productTotal = p * q;
+    const opts = pricingOrderOptions(input);
+    const settlement = computeSellerSettlement({
+        productTotal,
+        quantity: q,
+        ...opts,
+    }, input.feeConfig);
+    const totalProfit = settlement.sellerIncome - input.costPerUnit * q;
     return {
-        orderGross,
-        netBase,
-        platformFees,
-        revenue,
+        orderGross: productTotal,
+        sellerIncome: settlement.sellerIncome,
+        platformFees: settlement.platformFeesTotal,
+        taxTotal: settlement.taxTotal,
         totalProfit,
-        profitPerUnit,
+        profitPerUnit: totalProfit / q,
+        settlement,
     };
 }
-/** Đơn giá tối thiểu để đạt desiredProfitPerUnit (không voucher shop) */
-export function solveMinUnitPrice(quantity, costPerUnit, desiredProfitPerUnit, feeConfig) {
+
+function profitPerUnitAtPrice(unitPrice, quantity, costPerUnit, feeConfig, orderOpts) {
+    if (unitPrice <= 0)
+        return -Infinity;
+    return evaluateOrderProfit({
+        quantity,
+        unitPrice,
+        costPerUnit,
+        feeConfig,
+        ...orderOpts,
+    }).profitPerUnit;
+}
+
+/**
+ * Giá bán/sp tối thiểu để đạt lợi nhuận mong muốn (công thức ngược từ đối soát).
+ */
+export function solveMinUnitPrice(quantity, costPerUnit, desiredProfitPerUnit, feeConfig, orderOpts = {}) {
     const q = Math.max(1, Math.floor(quantity));
-    const rateSum = getRateSum(feeConfig);
-    if (rateSum >= 1)
-        return null;
-    const fixed = getFixedFeesPerOrder(feeConfig);
-    const numerator = q * (costPerUnit + desiredProfitPerUnit) + fixed;
-    const denominator = q * (1 - rateSum);
-    if (denominator <= 0)
-        return null;
-    return Math.ceil(numerator / denominator);
+    const opts = {
+        shippingBuyerForPayment: orderOpts.shippingBuyerForPayment ?? 0,
+        sellerShippingBurden: orderOpts.sellerShippingBurden ?? 0,
+    };
+    if (profitPerUnitAtPrice(1, q, costPerUnit, feeConfig, opts) >= desiredProfitPerUnit)
+        return 1;
+    let lo = 1;
+    let hi = Math.max(100_000, (costPerUnit + desiredProfitPerUnit) * 4);
+    while (profitPerUnitAtPrice(hi, q, costPerUnit, feeConfig, opts) < desiredProfitPerUnit) {
+        hi *= 2;
+        if (hi > 50_000_000)
+            return null;
+    }
+    while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (profitPerUnitAtPrice(mid, q, costPerUnit, feeConfig, opts) >= desiredProfitPerUnit)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    return lo;
 }

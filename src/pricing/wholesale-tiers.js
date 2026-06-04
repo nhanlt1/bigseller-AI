@@ -5,15 +5,16 @@ export function normalizeTiers(tiers) {
         .filter((t) => t.qtyMin > 0 && t.qtyMax >= t.qtyMin)
         .slice(0, MAX_TIERS);
 }
-export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfig) {
+export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfig, orderOpts = {}) {
     return normalizeTiers(tiers).map((tier, index) => {
-        const computed = solveMinUnitPrice(tier.qtyMin, costPerUnit, desiredProfitPerUnit, feeConfig) ?? 0;
+        const computed = solveMinUnitPrice(tier.qtyMin, costPerUnit, desiredProfitPerUnit, feeConfig, orderOpts) ?? 0;
         const profitAtMin = computed > 0
             ? evaluateOrderProfit({
                 quantity: tier.qtyMin,
                 unitPrice: computed,
                 costPerUnit,
                 feeConfig,
+                ...orderOpts,
             }).profitPerUnit
             : 0;
         const profitAtMax = computed > 0
@@ -22,6 +23,7 @@ export function evaluateTiers(tiers, costPerUnit, desiredProfitPerUnit, feeConfi
                 unitPrice: computed,
                 costPerUnit,
                 feeConfig,
+                ...orderOpts,
             }).profitPerUnit
             : 0;
         return {
