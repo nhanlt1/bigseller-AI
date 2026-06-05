@@ -57,6 +57,13 @@ const researchStore = {
     myProductTitles: [],
 };
 
+/** Pipeline tối ưu đang crawl — không reload/khôi phục «Tên SP của tôi» khi đổi keyword. */
+let optimizeCrawlActive = false;
+
+export function setOptimizeCrawlActive(active) {
+    optimizeCrawlActive = !!active;
+}
+
 function getSidebarMaxWidth() {
     return Math.min(window.innerWidth * 0.5, 720);
 }
@@ -145,18 +152,23 @@ function ensureResearchSession() {
     researchStore.sessionKey = sessionKey;
     researchStore.rows = [];
     researchStore.seenKeys = new Set();
-    researchStore.myProductTitles = loadMyProductTitlesList(sessionKey);
-    lastAutoIngestFingerprint = '';
-    lastIngestPage = null;
-    panelInstance?.applyMyProductTitleToInput();
-    try {
-        sessionStorage.removeItem(SIDEBAR_DISMISSED_KEY);
+    if (!optimizeCrawlActive) {
+        researchStore.myProductTitles = loadMyProductTitlesList(sessionKey);
+        lastAutoIngestFingerprint = '';
+        lastIngestPage = null;
+        panelInstance?.applyMyProductTitleToInput();
+        try {
+            sessionStorage.removeItem(SIDEBAR_DISMISSED_KEY);
+        }
+        catch {
+            /* private mode */
+        }
+        if (panelInstance && shouldAutoOpenSidebar() && !panelInstance.visible)
+            panelInstance.open();
     }
-    catch {
-        /* private mode */
+    else {
+        panelInstance?.renderMyTitleBadges();
     }
-    if (panelInstance && shouldAutoOpenSidebar() && !panelInstance.visible)
-        panelInstance.open();
 }
 
 function mergeResearchRows(newRows) {

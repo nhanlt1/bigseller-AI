@@ -1,6 +1,13 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
 import { buildPromptProductContext, sanitizeRewrittenProduct, } from '../../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../../shared/storage.js';
+import {
+    clearOptimizeProgressCallbacks,
+    hideOptimizeProgress,
+    setOptimizeProgressCallbacks,
+    showOptimizeProgress,
+    updateOptimizeProgress,
+} from './optimize-progress.js';
 import { getDescriptionToolbarPlacement } from './product-editor-anchors.js';
 import {
     mountFloatingEditorToolbar,
@@ -184,6 +191,118 @@ export class FloatingPanel {
     applyFromClipboard() {
         return this.handleApply();
     }
+
+    optimizePayloadFromPage() {
+        const product = this.adapter.extract();
+        if (!product?.title && !product?.description)
+            return null;
+        const platform = this.adapter.platform ?? 'shopee';
+        const ctx = buildPromptProductContext(product, platform);
+        const ids =
+            typeof this.adapter.extractIds === 'function'
+                ? this.adapter.extractIds()
+                : {
+                    itemId: product.itemId ?? '',
+                    shopId: product.shopId ?? '',
+                };
+        return {
+            title: ctx.title,
+            description: ctx.description,
+            shopName: ctx.shopName,
+            itemId: String(ids?.itemId ?? '').trim(),
+            shopId: String(ids?.shopId ?? '').trim(),
+            platform,
+        };
+    }
+
+    finishOptimizeRun() {
+        hideOptimizeProgress();
+        clearOptimizeProgressCallbacks();
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, false);
+        this.setState('idle');
+    }
+
+    async handleOptimizeCancel() {
+        try {
+            await sendMessage({ type: MessageType.OPTIMIZE_CANCEL });
+        }
+        catch {
+            /* SW có thể đã dừng */
+        }
+        this.finishOptimizeRun();
+    }
+
+    async handleOptimizeResume() {
+        updateOptimizeProgress('Đang tiếp tục sau CAPTCHA…', { waitingCaptcha: false });
+        try {
+            const result = await sendMessage({ type: MessageType.OPTIMIZE_RESUME });
+            if (!result?.ok) {
+                throw new Error(result?.error ?? 'Không tiếp tục được pipeline');
+            }
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : 'Không tiếp tục được';
+            if (isOptimizeServiceWorkerUnavailable(msg)) {
+                this.finishOptimizeRun();
+                this.setState('error', 'Pipeline chưa sẵn sàng — Reload extension rồi thử lại.');
+                return;
+            }
+            updateOptimizeProgress(msg, { waitingCaptcha: false });
+            window.setTimeout(() => this.finishOptimizeRun(), 2800);
+            this.setState('error', msg);
+        }
+    }
+
+    async handleOptimize() {
+        const payload = this.optimizePayloadFromPage();
+        if (!payload) {
+            this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
+            return;
+        }
+        this.setState('busy');
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, true);
+        showOptimizeProgress('Đang khởi động pipeline…');
+        setOptimizeProgressCallbacks({
+            onCancel: () => void this.handleOptimizeCancel(),
+            onResume: () => void this.handleOptimizeResume(),
+            onDone: () => this.finishOptimizeRun(),
+            onError: (message) => {
+                setEditorToolbarBusy(DESC_TOOLBAR_ID, false);
+                this.setState('idle');
+                if (message) {
+                    window.setTimeout(() => this.setState('error', message), 2900);
+                }
+            },
+        });
+        try {
+            const result = await sendMessage({
+                type: MessageType.OPTIMIZE_PRODUCT,
+                payload,
+            });
+            if (!result?.ok) {
+                throw new Error(result?.error ?? 'Pipeline chưa sẵn sàng');
+            }
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : 'Không tối ưu được';
+            if (isOptimizeServiceWorkerUnavailable(msg)) {
+                this.finishOptimizeRun();
+                this.setState('error', 'Pipeline chưa sẵn sàng — Reload extension rồi thử lại.');
+                return;
+            }
+            updateOptimizeProgress(msg, { waitingCaptcha: false });
+            window.setTimeout(() => this.finishOptimizeRun(), 2800);
+            this.setState('error', msg);
+        }
+    }
+
+    optimizeProduct() {
+        return this.handleOptimize();
+    }
+}
+
+function isOptimizeServiceWorkerUnavailable(message) {
+    return /receiving end does not exist|could not establish connection|message port closed|unknown message|not handled/i.test(message);
 }
 
 export const DESC_TOOLBAR_ID = 'bigseller-ai-desc-toolbar';
@@ -206,6 +325,12 @@ export function mountProductDescriptionToolbar(panel, platform) {
         wrap: platform === 'bigseller',
         getPlacement: () => getDescriptionToolbarPlacement(platform),
         buttons: [
+            {
+                id: 'optimize',
+                label: 'Tự động tối ưu',
+                primary: true,
+                onClick: () => panel.optimizeProduct(),
+            },
             {
                 id: 'rewrite-title',
                 label: 'Tên SP',

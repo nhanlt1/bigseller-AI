@@ -3,6 +3,7 @@ import { getMatchedResearchRow } from './similar-products-title-position.js';
 
 const MY_TITLES_LIST_SESSION_PREFIX = 'bigseller-ai-my-product-titles:';
 const MY_TITLES_LIST_GLOBAL_KEY = 'bigseller-ai-my-product-titles-global';
+const MY_TITLES_USER_CLEARED_KEY = 'bigseller-ai-my-product-titles-user-cleared';
 
 /** @deprecated slot storage — migrate only */
 const MY_TITLE_SLOT_COUNT = 2;
@@ -121,19 +122,36 @@ function loadLegacySlotTitles(sessionKey) {
     return fromShops;
 }
 
+function clearLegacyMyTitleStorage() {
+    try {
+        localStorage.removeItem(MY_TITLE_LEGACY_GLOBAL_KEY);
+        for (const shop of SIBLING_SHOPEE_SHOPS) {
+            localStorage.removeItem(myTitleGlobalKey(shop.shopId));
+        }
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            localStorage.removeItem(`${MY_TITLE_SLOT_GLOBAL_PREFIX}${i}`);
+        }
+    }
+    catch {
+        /* private mode */
+    }
+}
+
 /** @returns {string[]} */
 export function loadMyProductTitlesList(sessionKey) {
     try {
         const perSession = sessionStorage.getItem(
             `${MY_TITLES_LIST_SESSION_PREFIX}${sessionKey}`,
         );
-        const fromSession = parseTitlesJson(perSession);
-        if (fromSession?.length)
-            return fromSession;
+        if (perSession != null) {
+            return parseTitlesJson(perSession) ?? [];
+        }
         const global = localStorage.getItem(MY_TITLES_LIST_GLOBAL_KEY);
-        const fromGlobal = parseTitlesJson(global);
-        if (fromGlobal?.length)
-            return fromGlobal;
+        if (global != null) {
+            return parseTitlesJson(global) ?? [];
+        }
+        if (localStorage.getItem(MY_TITLES_USER_CLEARED_KEY) === '1')
+            return [];
     }
     catch {
         /* private mode */
@@ -151,10 +169,14 @@ export function saveMyProductTitlesList(sessionKey, titles) {
             `${MY_TITLES_LIST_SESSION_PREFIX}${sessionKey}`,
             JSON.stringify(cleaned),
         );
-        if (cleaned.length)
-            localStorage.setItem(MY_TITLES_LIST_GLOBAL_KEY, JSON.stringify(cleaned));
-        else
-            localStorage.removeItem(MY_TITLES_LIST_GLOBAL_KEY);
+        localStorage.setItem(MY_TITLES_LIST_GLOBAL_KEY, JSON.stringify(cleaned));
+        if (cleaned.length === 0) {
+            localStorage.setItem(MY_TITLES_USER_CLEARED_KEY, '1');
+            clearLegacyMyTitleStorage();
+        }
+        else {
+            localStorage.removeItem(MY_TITLES_USER_CLEARED_KEY);
+        }
     }
     catch {
         /* private mode */

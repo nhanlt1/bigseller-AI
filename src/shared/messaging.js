@@ -19,6 +19,16 @@ export const MessageType = {
     APPLY_PRODUCT: 'APPLY_PRODUCT',
     GET_SETTINGS: 'GET_SETTINGS',
     PING: 'PING',
+    /** Edit tab → SW: bắt đầu pipeline tối ưu SEO */
+    OPTIMIZE_PRODUCT: 'OPTIMIZE_PRODUCT',
+    /** SW → tab shopee.vn: crawl trang 1 theo keyword */
+    SHOPEE_SEARCH_CRAWL: 'SHOPEE_SEARCH_CRAWL',
+    /** Edit tab → SW: tiếp tục sau khi user giải CAPTCHA */
+    OPTIMIZE_RESUME: 'OPTIMIZE_RESUME',
+    /** SW → edit tab: cập nhật overlay progress */
+    OPTIMIZE_PROGRESS: 'OPTIMIZE_PROGRESS',
+    /** Edit tab → SW: hủy pipeline đang chạy */
+    OPTIMIZE_CANCEL: 'OPTIMIZE_CANCEL',
 };
 /** Gọi sendResponse an toàn — tránh lỗi khi channel đã đóng */
 export function safeSendResponse(sendResponse, payload) {

@@ -28,6 +28,6 @@ if (!globalThis[GEMINI_SCRIPT_FLAG]) {
         if (message?.type !== MessageType.GEMINI_SEND_PROMPT)
             return false;
         const payload = message.payload;
-        return replyAsync(sendResponse, () => runGeminiPrompt(payload.prompt, payload.requestId, payload.title, payload.description));
+        return replyAsync(sendResponse, () => runGeminiPrompt(payload.prompt, payload.requestId, payload.title, payload.description, payload.expectedSchema ?? 'product'));
     });
 }

@@ -1,4 +1,5 @@
-import { parseGeminiProductJson, setGeminiLastResponseHash, } from '../../shared/storage.js';
+import { setGeminiLastResponseHash, } from '../../shared/storage.js';
+import { parseGeminiKeywordsJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
 import { hashProductContent } from '../../shared/text-hash.js';
 import { queryFirst, setQuillText, waitForElement } from '../shared/dom-utils.js';
 import { GEMINI_INPUT_SELECTORS, GEMINI_SEND_SELECTORS } from './selectors.js';
@@ -37,9 +38,11 @@ export async function fillGeminiComposer(prompt) {
     editor.focus();
 }
 
-export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDescription) {
+/** @typedef {'keywords' | 'product'} GeminiExpectedSchema */
+
+export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDescription, expectedSchema = 'product') {
     try {
-        geminiDebugLog('run', `requestId=${requestId} — bắt đầu runGeminiPrompt`);
+        geminiDebugLog('run', `requestId=${requestId} — bắt đầu runGeminiPrompt`, { expectedSchema });
         const editor = await waitForElement(GEMINI_INPUT_SELECTORS, 30000);
         if (!editor) {
             throw new Error('Không tìm thấy ô nhập Gemini');
@@ -54,13 +57,18 @@ export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDesc
             throw new Error('Không thể gửi tin nhắn (nút Send không khả dụng)');
         }
         geminiDebugLog('run', 'Đã bấm Send — bắt đầu poll bubble');
-        const { text: responseText, hash: responseHash } = await waitForNewStableResponse(snapshot);
-        const parsed = parseGeminiProductJson(responseText);
+        const { text: responseText, hash: responseHash } = await waitForNewStableResponse(snapshot, 120000, expectedSchema);
+        const parsed = expectedSchema === 'keywords'
+            ? parseGeminiKeywordsJson(responseText)
+            : parseGeminiProductJson(responseText);
         if (!parsed) {
+            const schemaHint = expectedSchema === 'keywords'
+                ? '{"keywords":["..."]}'
+                : '{"title":"...","description":"..."}';
             return {
                 requestId,
                 text: responseText,
-                error: 'Gemini phải trả JSON {"title":"...","description":"..."} — không parse được',
+                error: `Gemini phải trả JSON ${schemaHint} — không parse được`,
             };
         }
         await setGeminiLastResponseHash(responseHash);

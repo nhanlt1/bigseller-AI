@@ -280,7 +280,14 @@ export function scrapeSimilarProducts(root = document, page = 1) {
     const soldEl =
       card.querySelector(".text-shopee-black87.text-xs") ??
       card.querySelector('[class*="text-xs"][class*="truncate"]');
-    const sold = parseSoldCount(soldEl?.textContent ?? "");
+    let sold = parseSoldCount(soldEl?.textContent ?? "");
+    if (sold.soldNumeric == null) {
+      const soldMatch = (card.textContent ?? "").match(
+        /Đã bán\s*([\d.,]+k?\+?)/i,
+      );
+      if (soldMatch)
+        sold = parseSoldCount(soldMatch[1]);
+    }
     const cardText = card.textContent ?? "";
     const price = readCardPrice(card);
     const ids = parseProductIdsFromUrl(productUrl);

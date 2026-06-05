@@ -1,60 +1,205 @@
 <!DOCTYPE html>
+
 <html lang="vi">
+
   <head>
+
     <meta charset="UTF-8" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <title>BigSeller AI — Cài đặt</title>
+
     <link rel="stylesheet" href="./options.css" />
+
   </head>
+
   <body>
+
     <main class="container">
+
       <header>
+
         <h1>BigSeller AI — Cài đặt</h1>
+
         <p class="subtitle">Prompt AI, công thức tính giá và biến mặc định</p>
+
       </header>
 
+
+
       <form id="settings-form">
+
         <section>
+
           <h2>Ngôn ngữ viết lại</h2>
+
           <label>
+
             Ngôn ngữ
+
             <input type="text" id="language" name="language" placeholder="Việt" />
+
           </label>
+
         </section>
 
+
+
         <section>
+
           <h2>Prompt template</h2>
+
           <p class="hint">
+
             Biến: <code>{title}</code>, <code>{description}</code>, <code>{language}</code>.
+
             Mỗi lần Copy prompt, extension ghép yêu cầu trả JSON
+
             <code>{"title":"...","description":"..."}</code> — bước tìm từ khóa vàng chỉ làm nội bộ, không ghi vào JSON.
+
             Biến: <code>{shopName}</code> (tự lấy từ gian hàng trên trang). Panel → Viết lại bằng AI (tự gửi Gemini) hoặc Copy prompt thủ công.
+
           </p>
+
           <textarea id="promptTemplate" name="promptTemplate" rows="12"></textarea>
+
         </section>
 
+
+
         <section>
-          <h2>Công thức tính giá</h2>
+
+          <h2>Tự động tối ưu SEO</h2>
+
           <p class="hint">
-            Biến: <code>cost</code>, <code>profitRate</code>, <code>shopeeFee</code>,
-            <code>shippingSubsidy</code>, <code>voucherRate</code>
+
+            Pipeline crawl SERP trang 1 trên shopee.vn. Biến prompt: <code>{title}</code>, <code>{description}</code>, <code>{shopName}</code>, <code>{language}</code>;
+
+            prompt phân tích thêm <code>{sourcePositionsBlock}</code>, <code>{competitorsTsv}</code>.
+
           </p>
-          <input type="text" id="pricingFormula" name="pricingFormula" class="wide" />
-          <p id="formula-preview" class="preview"></p>
+
+          <div class="grid">
+
+            <label>
+
+              Số từ khóa tối đa
+
+              <input type="number" id="optimizeMaxKeywords" min="1" max="15" step="1" />
+
+            </label>
+
+            <label>
+
+              Đã bán tối thiểu (lọc đối thủ)
+
+              <input type="number" id="optimizeMinSold" min="0" step="1" />
+
+            </label>
+
+            <label>
+
+              Delay sau navigate (ms)
+
+              <input type="number" id="optimizeNavigateDelayMs" min="500" step="100" />
+
+            </label>
+
+            <label>
+
+              Delay mỗi bước scroll (ms)
+
+              <input type="number" id="optimizeScrollStepDelayMs" min="200" step="100" />
+
+            </label>
+
+            <label>
+
+              Delay giữa các từ khóa (ms)
+
+              <input type="number" id="optimizeBetweenKeywordDelayMs" min="500" step="100" />
+
+            </label>
+
+            <label>
+
+              Số thẻ SP tối thiểu / trang 1
+
+              <input type="number" id="optimizeMinProductCards" min="10" max="80" step="1" />
+
+            </label>
+
+          </div>
+
+          <label>
+
+            Prompt từ khóa (Gemini bước 1)
+
+            <textarea id="optimizeKeywordPrompt" rows="8"></textarea>
+
+          </label>
+
+          <label>
+
+            Prompt phân tích (Gemini bước 2)
+
+            <textarea id="optimizeAnalysisPrompt" rows="10"></textarea>
+
+          </label>
+
         </section>
 
+
+
         <section>
-          <h2>Biến mặc định</h2>
-          <div id="variables-grid" class="grid"></div>
+
+          <h2>Công thức tính giá</h2>
+
+          <p class="hint">
+
+            Biến: <code>cost</code>, <code>profitRate</code>, <code>shopeeFee</code>,
+
+            <code>shippingSubsidy</code>, <code>voucherRate</code>
+
+          </p>
+
+          <input type="text" id="pricingFormula" name="pricingFormula" class="wide" />
+
+          <p id="formula-preview" class="preview"></p>
+
         </section>
+
+
+
+        <section>
+
+          <h2>Biến mặc định</h2>
+
+          <div id="variables-grid" class="grid"></div>
+
+        </section>
+
+
 
         <div class="actions">
+
           <button type="submit" class="btn primary">Lưu cài đặt</button>
+
           <button type="button" id="reset-btn" class="btn">Khôi phục mặc định</button>
+
           <span id="status" class="status"></span>
+
         </div>
+
       </form>
+
     </main>
+
     <script type="module" src="./options.js"></script>
+
   </body>
+
 </html>
+
+

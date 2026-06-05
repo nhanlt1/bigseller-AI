@@ -210,6 +210,18 @@ export const DEFAULT_PRICING_CALCULATOR = {
 export const DEFAULT_SETTINGS = {
   promptTemplate: DEFAULT_PROMPT_TEMPLATE,
   language: "Việt",
+  /** Pipeline tối ưu SEO — số từ khóa tối đa sau Gemini bước 1 */
+  optimizeMaxKeywords: 8,
+  /** Lọc đối thủ SERP: soldNumeric tối thiểu */
+  optimizeMinSold: 1,
+  /** Prompt tùy chỉnh — để trống dùng mặc định trong optimize-prompts.js */
+  optimizeKeywordPrompt: "",
+  optimizeAnalysisPrompt: "",
+  optimizeNavigateDelayMs: 4000,
+  optimizeScrollStepDelayMs: 900,
+  optimizeBetweenKeywordDelayMs: 3500,
+  /** Chờ đủ thẻ SP trang 1 trước khi scrape (Shopee ~60 SP/trang) */
+  optimizeMinProductCards: 55,
   pricingFormula: DEFAULT_PRICING_FORMULA,
   pricingVariables: { ...DEFAULT_PRICING_VARIABLES },
   pricingCalculator: {
@@ -303,6 +315,28 @@ function mergeStoredSettings(stored) {
       ...DEFAULT_SHOPEE_FEE_CONFIG,
       ...stored?.platformFeeConfig,
     },
+    optimizeMaxKeywords:
+      stored?.optimizeMaxKeywords ?? DEFAULT_SETTINGS.optimizeMaxKeywords,
+    optimizeMinSold:
+      stored?.optimizeMinSold ?? DEFAULT_SETTINGS.optimizeMinSold,
+    optimizeNavigateDelayMs:
+      stored?.optimizeNavigateDelayMs ??
+      DEFAULT_SETTINGS.optimizeNavigateDelayMs,
+    optimizeScrollStepDelayMs:
+      stored?.optimizeScrollStepDelayMs ??
+      DEFAULT_SETTINGS.optimizeScrollStepDelayMs,
+    optimizeBetweenKeywordDelayMs:
+      stored?.optimizeBetweenKeywordDelayMs ??
+      DEFAULT_SETTINGS.optimizeBetweenKeywordDelayMs,
+    optimizeMinProductCards:
+      stored?.optimizeMinProductCards ??
+      DEFAULT_SETTINGS.optimizeMinProductCards,
+    optimizeKeywordPrompt:
+      stored?.optimizeKeywordPrompt?.trim() ||
+      DEFAULT_SETTINGS.optimizeKeywordPrompt,
+    optimizeAnalysisPrompt:
+      stored?.optimizeAnalysisPrompt?.trim() ||
+      DEFAULT_SETTINGS.optimizeAnalysisPrompt,
   };
 }
 

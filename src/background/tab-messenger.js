@@ -8,12 +8,12 @@ function urlMatchesPattern(url, pattern) {
 }
 function getScriptFiles(kind) {
     const manifest = chrome.runtime.getManifest();
-    const needle = kind === 'shopee'
-        ? 'banhang.shopee'
+    const needles = kind === 'shopee'
+        ? ['banhang.shopee', '.shopee.vn']
         : kind === 'bigseller'
-            ? 'bigseller.com'
-            : 'gemini.google.com';
-    const entry = manifest.content_scripts?.find((cs) => cs.matches?.some((m) => m.includes(needle)));
+            ? ['bigseller.com']
+            : ['gemini.google.com'];
+    const entry = manifest.content_scripts?.find((cs) => cs.matches?.some((m) => needles.some((needle) => m.includes(needle))));
     return entry?.js ?? [];
 }
 async function injectContentScript(tabId, kind) {
@@ -27,6 +27,10 @@ async function injectContentScript(tabId, kind) {
 }
 function inferKindFromUrl(url) {
     if (/banhang\.shopee\.(vn|com)/i.test(url))
+        return 'shopee';
+    if (/^https?:\/\/(?:www\.)?shopee\.(vn|com)\b/i.test(url))
+        return 'shopee';
+    if (/(?:^https?:\/\/)?(?:[\w-]+\.)?shopee\.vn/i.test(url))
         return 'shopee';
     if (/bigseller\.com/i.test(url))
         return 'bigseller';

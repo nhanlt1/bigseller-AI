@@ -1,5 +1,6 @@
 import { bigsellerAdapter } from './adapter.js';
 import { listenForProductApply } from '../shared/apply-listener.js';
+import { mountOptimizeProgressListener } from '../shared/optimize-progress.js';
 import { observeDomChanges } from '../shared/dom-utils.js';
 import { mountImageFab, refreshImageToolbar, IMAGE_TOOLBAR_ID } from '../shared/image-fab.js';
 import {
@@ -15,6 +16,7 @@ import {
 } from '../shared/product-category-fee.js';
 
 listenForProductApply(bigsellerAdapter);
+mountOptimizeProgressListener();
 
 let editorPanel = null;
 
