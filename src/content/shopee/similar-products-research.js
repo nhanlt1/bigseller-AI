@@ -7,11 +7,15 @@ import {
     syncShopeeSearchPageLayout,
 } from './similar-products-search-layout.js';
 import { buildSimilarProductsTitleResearchPrompt } from './similar-products-title-prompt.js';
-import { focusProductCardForRow } from './similar-products-card-focus.js';
 import {
-    getMatchedResearchRow,
-    resolveMyProductDisplayPosition,
-} from './similar-products-title-position.js';
+    deriveTitlesByShopFromList,
+    loadMyProductTitlesList,
+    normalizePastedProductTitle,
+    renderMyTitlesSectionHtml,
+    saveMyProductTitlesList,
+} from './similar-products-my-titles.js';
+import { focusProductCardForRow } from './similar-products-card-focus.js';
+import { resolveMyProductDisplayPosition } from './similar-products-title-position.js';
 import {
     RESEARCH_EXPORT_COLUMNS,
     RESEARCH_TABLE_COLUMNS,
@@ -45,153 +49,13 @@ const SIMILAR_PAGE_READY_SELECTORS = [
     '.rBfdm_.row',
 ];
 
-const MY_TITLE_SLOT_COUNT = 2;
-const MY_TITLE_SLOT_SESSION_PREFIX = 'bigseller-ai-my-product-title-slot:';
-const MY_TITLE_SLOT_GLOBAL_PREFIX = 'bigseller-ai-my-product-title-global-slot:';
-const MY_TITLE_LEGACY_PREFIX = 'bigseller-ai-my-product-title:';
-const MY_TITLE_LEGACY_GLOBAL_KEY = 'bigseller-ai-my-product-title-global';
-const MY_TITLE_SESSION_PREFIX = 'bigseller-ai-my-product-title-shop:';
-const MY_TITLE_GLOBAL_PREFIX = 'bigseller-ai-my-product-title-global-shop:';
-
-function emptyProductTitles() {
-    return Object.fromEntries(
-        SIBLING_SHOPEE_SHOPS.map((s) => [s.shopId, '']),
-    );
-}
-
-function emptyProductTitleSlots() {
-    return Array(MY_TITLE_SLOT_COUNT).fill('');
-}
-
-/** @type {{ sessionKey: string, rows: Record<string, unknown>[], seenKeys: Set<string>, myProductTitleSlots: string[] }} */
+/** @type {{ sessionKey: string, rows: Record<string, unknown>[], seenKeys: Set<string>, myProductTitles: string[] }} */
 const researchStore = {
     sessionKey: '',
     rows: [],
     seenKeys: new Set(),
-    myProductTitleSlots: emptyProductTitleSlots(),
+    myProductTitles: [],
 };
-
-function myTitleStorageKey(sessionKey, shopId) {
-    return `${MY_TITLE_SESSION_PREFIX}${shopId}:${sessionKey}`;
-}
-
-function myTitleGlobalKey(shopId) {
-    return `${MY_TITLE_GLOBAL_PREFIX}${shopId}`;
-}
-
-function loadMyProductTitles(sessionKey) {
-    const titles = emptyProductTitles();
-    for (const shop of SIBLING_SHOPEE_SHOPS) {
-        try {
-            const perSession = sessionStorage.getItem(
-                myTitleStorageKey(sessionKey, shop.shopId),
-            );
-            if (perSession != null && perSession !== '') {
-                titles[shop.shopId] = perSession;
-                continue;
-            }
-            if (shop.shopId === SIBLING_SHOPEE_SHOPS[0].shopId) {
-                const legacySession = sessionStorage.getItem(
-                    `${MY_TITLE_LEGACY_PREFIX}${sessionKey}`,
-                );
-                if (legacySession) {
-                    titles[shop.shopId] = legacySession;
-                    continue;
-                }
-                const legacyGlobal = localStorage.getItem(MY_TITLE_LEGACY_GLOBAL_KEY);
-                if (legacyGlobal) {
-                    titles[shop.shopId] = legacyGlobal;
-                    continue;
-                }
-            }
-            const global = localStorage.getItem(myTitleGlobalKey(shop.shopId));
-            if (global)
-                titles[shop.shopId] = global;
-        }
-        catch {
-            /* private mode */
-        }
-    }
-    return titles;
-}
-
-function myTitleSlotSessionKey(sessionKey, slotIndex) {
-    return `${MY_TITLE_SLOT_SESSION_PREFIX}${slotIndex}:${sessionKey}`;
-}
-
-function myTitleSlotGlobalKey(slotIndex) {
-    return `${MY_TITLE_SLOT_GLOBAL_PREFIX}${slotIndex}`;
-}
-
-function loadMyProductTitleSlots(sessionKey) {
-    const slots = emptyProductTitleSlots();
-    for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-        try {
-            const perSession = sessionStorage.getItem(
-                myTitleSlotSessionKey(sessionKey, i),
-            );
-            if (perSession != null) {
-                slots[i] = perSession;
-                continue;
-            }
-            const global = localStorage.getItem(myTitleSlotGlobalKey(i));
-            if (global != null)
-                slots[i] = global;
-        }
-        catch {
-            /* private mode */
-        }
-    }
-    if (!slots.some((s) => String(s).trim())) {
-        const legacy = loadMyProductTitles(sessionKey);
-        let idx = 0;
-        for (const shop of SIBLING_SHOPEE_SHOPS) {
-            const title = String(legacy[shop.shopId] ?? '').trim();
-            if (title && idx < MY_TITLE_SLOT_COUNT)
-                slots[idx++] = title;
-        }
-    }
-    return slots;
-}
-
-function saveMyProductTitleSlot(sessionKey, slotIndex, title) {
-    try {
-        sessionStorage.setItem(
-            myTitleSlotSessionKey(sessionKey, slotIndex),
-            title,
-        );
-        if (String(title ?? '').trim())
-            localStorage.setItem(myTitleSlotGlobalKey(slotIndex), title);
-    }
-    catch {
-        /* private mode */
-    }
-}
-
-/** Gán tên SP vào shop theo dòng khớp trong bảng; chưa khớp thì gán shop trống (chỉ cho prompt) */
-function deriveTitlesByShopFromSlots(rows, slots) {
-    const titles = emptyProductTitles();
-    const unmatched = [];
-    for (const raw of slots) {
-        const value = String(raw ?? '').trim();
-        if (!value)
-            continue;
-        const row = getMatchedResearchRow(rows, value);
-        const shopId = String(row?.shopId ?? '').trim();
-        if (shopId && isSiblingShopId(shopId))
-            titles[shopId] = value;
-        else
-            unmatched.push(value);
-    }
-    for (const value of unmatched) {
-        const freeShop = SIBLING_SHOPEE_SHOPS.find(
-            (s) => !String(titles[s.shopId] ?? '').trim(),
-        );
-        if (freeShop)
-            titles[freeShop.shopId] = value;
-    }
-    return titles;
-}
 
 function getSidebarMaxWidth() {
     return Math.min(window.innerWidth * 0.5, 720);
@@ -281,8 +145,7 @@ function ensureResearchSession() {
     researchStore.sessionKey = sessionKey;
     researchStore.rows = [];
     researchStore.seenKeys = new Set();
-    const loaded = loadMyProductTitleSlots(sessionKey);
-    researchStore.myProductTitleSlots = loaded;
+    researchStore.myProductTitles = loadMyProductTitlesList(sessionKey);
     lastAutoIngestFingerprint = '';
     lastIngestPage = null;
     panelInstance?.applyMyProductTitleToInput();
@@ -452,7 +315,7 @@ class SimilarResearchPanel {
     shadow;
     visible = false;
     sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
-    /** @type {Record<string, ReturnType<import('./similar-products-title-position.js')['resolveMyProductDisplayPosition']>>} */
+    /** @type {Record<number, ReturnType<typeof resolveMyProductDisplayPosition>>} */
     lastPositions = {};
     rows = researchStore.rows;
 
@@ -523,17 +386,80 @@ class SimilarResearchPanel {
     }
 
     persistMyProductTitleFromInput() {
-        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-            const el = this.shadow.getElementById(`my-product-title-slot-${i}`);
-            if (!el)
-                continue;
-            const value = el.value;
-            if (value === (researchStore.myProductTitleSlots[i] ?? ''))
-                continue;
-            researchStore.myProductTitleSlots[i] = value;
-            if (researchStore.sessionKey)
-                saveMyProductTitleSlot(researchStore.sessionKey, i, value);
+        this.syncMyProductTitlesFromDom();
+    }
+
+    syncMyProductTitlesFromDom() {
+        const wrap = this.shadow.getElementById('my-title-badges');
+        if (!wrap)
+            return;
+        const next = [];
+        wrap.querySelectorAll('.my-title-chip-input').forEach((input) => {
+            const value = normalizePastedProductTitle(input.value);
+            if (value)
+                next.push(value);
+        });
+        if (
+            next.length === researchStore.myProductTitles.length &&
+            next.every((t, i) => t === researchStore.myProductTitles[i])
+        ) {
+            return;
         }
+        researchStore.myProductTitles = next;
+        if (researchStore.sessionKey)
+            saveMyProductTitlesList(researchStore.sessionKey, next);
+    }
+
+    saveMyProductTitles(titles) {
+        ensureResearchSession();
+        researchStore.myProductTitles = saveMyProductTitlesList(
+            researchStore.sessionKey,
+            titles,
+        );
+        this.renderMyTitleBadges();
+        this.updateMyTitlePositionHints();
+    }
+
+    addMyProductTitle(raw) {
+        const value = normalizePastedProductTitle(raw);
+        if (!value)
+            return;
+        const titles = [...this.getMyProductTitleList()];
+        if (titles.some((t) => t === value))
+            return;
+        titles.push(value);
+        this.saveMyProductTitles(titles);
+    }
+
+    removeMyProductTitle(index) {
+        const titles = [...this.getMyProductTitleList()];
+        if (index < 0 || index >= titles.length)
+            return;
+        titles.splice(index, 1);
+        this.saveMyProductTitles(titles);
+    }
+
+    updateMyProductTitle(index, raw) {
+        const value = normalizePastedProductTitle(raw);
+        const titles = [...this.getMyProductTitleList()];
+        if (index < 0 || index >= titles.length)
+            return;
+        if (!value) {
+            titles.splice(index, 1);
+            this.saveMyProductTitles(titles);
+            return;
+        }
+        if (titles.some((t, i) => i !== index && t === value))
+            return;
+        titles[index] = value;
+        this.saveMyProductTitles(titles);
+    }
+
+    clearAllMyProductTitles() {
+        this.saveMyProductTitles([]);
+        const paste = this.shadow.getElementById('my-title-paste');
+        if (paste)
+            paste.value = '';
     }
 
     toggle() {
@@ -555,85 +481,121 @@ class SimilarResearchPanel {
         purgeDomMainRows();
         this.rows = researchStore.rows;
         this.renderTable();
-        this.applyMyProductTitleToInput();
+        this.renderMyTitleBadges();
         this.updateMyTitlePositionHints();
         if (statusText)
             this.setStatus(statusText);
     }
 
-    applyMyProductTitleToInput() {
-        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-            const el = this.shadow.getElementById(`my-product-title-slot-${i}`);
-            if (!el)
-                continue;
-            const saved = researchStore.myProductTitleSlots[i] ?? '';
-            if (saved && el.value !== saved)
-                el.value = saved;
-            else if (!saved && el.value.trim()) {
-                researchStore.myProductTitleSlots[i] = el.value;
-                if (researchStore.sessionKey)
-                    saveMyProductTitleSlot(researchStore.sessionKey, i, el.value);
-            }
+    renderMyTitleBadges() {
+        const wrap = this.shadow.getElementById('my-title-badges');
+        if (!wrap)
+            return;
+        const titles = researchStore.myProductTitles;
+        if (!titles.length) {
+            wrap.innerHTML = '<p class="my-title-empty">Chưa có tên SP — dán vào ô bên dưới.</p>';
+            return;
         }
+        wrap.innerHTML = titles
+            .map((title, index) => {
+                const pos = this.lastPositions[index];
+                const posHidden = !pos || pos.empty;
+                const posHtml = posHidden
+                    ? ''
+                    : `<p class="my-title-position" data-index="${index}"
+                        data-found="${pos.found ? '1' : '0'}"
+                        data-clickable="${pos.found ? '1' : '0'}"
+                        title="${pos.found ? 'Bấm để cuộn tới SP và highlight trên trang Shopee' : ''}">${escapeHtml(pos.uiText)}</p>`;
+                return `<div class="my-title-chip" data-index="${index}">
+            <div class="my-title-chip-row">
+              <input type="text" class="my-title-chip-input" data-index="${index}"
+                value="${escapeAttr(title)}" autocomplete="off" spellcheck="false" />
+              <button type="button" class="my-title-chip-remove" data-index="${index}"
+                title="Xóa tên SP" aria-label="Xóa">×</button>
+            </div>
+            ${posHtml}
+          </div>`;
+            })
+            .join('');
     }
 
-    getMyProductTitleSlots() {
-        const slots = [...researchStore.myProductTitleSlots];
-        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-            const fromInput =
-                this.shadow.getElementById(`my-product-title-slot-${i}`)?.value ?? '';
-            slots[i] = fromInput;
-        }
-        return slots;
+    applyMyProductTitleToInput() {
+        this.renderMyTitleBadges();
+    }
+
+    getMyProductTitleList() {
+        this.syncMyProductTitlesFromDom();
+        return [...researchStore.myProductTitles];
     }
 
     getMyProductTitles() {
-        return deriveTitlesByShopFromSlots(
+        return deriveTitlesByShopFromList(
             researchStore.rows,
-            this.getMyProductTitleSlots(),
+            this.getMyProductTitleList(),
         );
     }
 
-    onMyProductTitleInput(slotIndex, value) {
-        ensureResearchSession();
-        researchStore.myProductTitleSlots[slotIndex] = value;
-        saveMyProductTitleSlot(researchStore.sessionKey, slotIndex, value);
-        this.updateMyTitlePositionHints();
+    onMyProductTitleChipInput(index, value) {
+        const titles = [...researchStore.myProductTitles];
+        if (index < 0 || index >= titles.length)
+            return;
+        titles[index] = value;
+        researchStore.myProductTitles = titles;
+        this.refreshSinglePositionHint(index, value);
+    }
+
+    refreshSinglePositionHint(index, title) {
+        const wrap = this.shadow.getElementById('my-title-badges');
+        if (!wrap)
+            return;
+        const position = resolveMyProductDisplayPosition(
+            researchStore.rows,
+            title ?? '',
+            { shopLabel: `SP ${index + 1}` },
+        );
+        this.lastPositions[index] = position;
+        const chip = wrap.querySelector(`.my-title-chip[data-index="${index}"]`);
+        if (!chip)
+            return;
+        let posEl = chip.querySelector('.my-title-position');
+        if (position.empty) {
+            posEl?.remove();
+            return;
+        }
+        if (!posEl) {
+            posEl = document.createElement('p');
+            posEl.className = 'my-title-position';
+            posEl.dataset.index = String(index);
+            chip.appendChild(posEl);
+        }
+        posEl.textContent = position.uiText;
+        posEl.dataset.found = position.found ? '1' : '0';
+        posEl.dataset.clickable = position.found ? '1' : '0';
+        posEl.title = position.found
+            ? 'Bấm để cuộn tới SP và highlight trên trang Shopee'
+            : '';
     }
 
     updateMyTitlePositionHints() {
-        const slots = this.getMyProductTitleSlots();
-        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-            const el = this.shadow.getElementById(`my-title-position-slot-${i}`);
-            if (!el)
-                continue;
-            const position = resolveMyProductDisplayPosition(
+        const titles = this.getMyProductTitleList();
+        this.lastPositions = {};
+        for (let i = 0; i < titles.length; i++) {
+            this.lastPositions[i] = resolveMyProductDisplayPosition(
                 researchStore.rows,
-                slots[i] ?? '',
+                titles[i] ?? '',
+                { shopLabel: `SP ${i + 1}` },
             );
-            this.lastPositions[i] = position;
-            if (position.empty) {
-                el.textContent = '';
-                el.hidden = true;
-                el.dataset.clickable = '0';
-                continue;
-            }
-            el.hidden = false;
-            el.textContent = position.uiText;
-            el.dataset.found = position.found ? '1' : '0';
-            el.dataset.clickable = position.found ? '1' : '0';
-            el.title = position.found
-                ? 'Bấm để cuộn tới SP và highlight trên trang Shopee'
-                : '';
         }
+        this.renderMyTitleBadges();
     }
 
-    async onPositionHintClick(slotIndex) {
-        const slots = this.getMyProductTitleSlots();
-        const position = this.lastPositions[slotIndex] ??
+    async onPositionHintClick(index) {
+        const titles = this.getMyProductTitleList();
+        const position = this.lastPositions[index] ??
             resolveMyProductDisplayPosition(
                 researchStore.rows,
-                slots[slotIndex] ?? '',
+                titles[index] ?? '',
+                { shopLabel: `SP ${index + 1}` },
             );
         if (!position?.found || !position.matchedRow) {
             this.setStatus('Không tìm thấy vị trí hiển thị trên trang.');
@@ -702,7 +664,7 @@ class SimilarResearchPanel {
           <button type="button" class="btn sm" id="csv-btn" disabled>CSV</button>
         </div>
         <div class="my-title-bars">
-          ${renderMyTitleBarsHtml()}
+          ${renderMyTitlesSectionHtml()}
         </div>
         <p class="status" id="status">Tự động lấy trang đang xem — sang trang 2, 3… thì cộng dồn.</p>
         <div class="body">
@@ -757,16 +719,68 @@ class SimilarResearchPanel {
         }, { passive: true });
     }
 
+    bindMyTitleEvents() {
+        const paste = this.shadow.getElementById('my-title-paste');
+        paste?.addEventListener('paste', (ev) => {
+            const text = ev.clipboardData?.getData('text/plain') ?? '';
+            if (!String(text).trim())
+                return;
+            ev.preventDefault();
+            this.addMyProductTitle(text);
+            paste.value = '';
+        });
+        paste?.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.metaKey)
+                return;
+            const text = paste.value;
+            if (!String(text).trim())
+                return;
+            ev.preventDefault();
+            this.addMyProductTitle(text);
+            paste.value = '';
+        });
+        this.shadow.getElementById('my-titles-clear-all')?.addEventListener('click', () => {
+            this.clearAllMyProductTitles();
+        });
+        const badges = this.shadow.getElementById('my-title-badges');
+        badges?.addEventListener('input', (ev) => {
+            const input = ev.target.closest('.my-title-chip-input');
+            if (!input)
+                return;
+            const index = Number.parseInt(input.dataset.index ?? '', 10);
+            if (Number.isFinite(index))
+                this.onMyProductTitleChipInput(index, input.value);
+        });
+        badges?.addEventListener('click', (ev) => {
+            const removeBtn = ev.target.closest('.my-title-chip-remove');
+            if (removeBtn) {
+                ev.preventDefault();
+                const index = Number.parseInt(removeBtn.dataset.index ?? '', 10);
+                if (Number.isFinite(index))
+                    this.removeMyProductTitle(index);
+                return;
+            }
+            const posEl = ev.target.closest('.my-title-position[data-clickable="1"]');
+            if (posEl) {
+                const index = Number.parseInt(posEl.dataset.index ?? '', 10);
+                if (Number.isFinite(index))
+                    void this.onPositionHintClick(index);
+            }
+        });
+        badges?.addEventListener('blur', (ev) => {
+            const input = ev.target.closest('.my-title-chip-input');
+            if (!input)
+                return;
+            const index = Number.parseInt(input.dataset.index ?? '', 10);
+            if (!Number.isFinite(index))
+                return;
+            this.updateMyProductTitle(index, input.value);
+        }, true);
+    }
+
     bindEvents() {
         this.bindResizeHandle();
-        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
-            this.shadow.getElementById(`my-product-title-slot-${i}`)?.addEventListener('input', (ev) => {
-                this.onMyProductTitleInput(i, ev.target.value);
-            });
-            this.shadow.getElementById(`my-title-position-slot-${i}`)?.addEventListener('click', () => {
-                void this.onPositionHintClick(i);
-            });
-        }
+        this.bindMyTitleEvents();
         this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
             this.close(true);
         });
@@ -807,12 +821,13 @@ class SimilarResearchPanel {
             this.setStatus('Chưa có dữ liệu — đang chờ thu thập tự động.');
             return;
         }
-        const slots = this.getMyProductTitleSlots();
+        const titles = this.getMyProductTitleList();
         const prompt = buildSimilarProductsTitleResearchPrompt(
             this.rows,
             this.getMyProductTitles(),
             {
-                filledSlotCount: slots.filter((s) => String(s).trim()).length,
+                productTitles: titles,
+                filledSlotCount: titles.length,
             },
         );
         try {
@@ -964,22 +979,6 @@ function installTableScrollContainment(scrollEl) {
         },
         { capture: true, passive: false },
     );
-}
-
-function renderMyTitleBarsHtml() {
-    const inputs = Array.from({ length: MY_TITLE_SLOT_COUNT }, (_, i) => `
-          <div class="my-title-bar">
-            <input type="text" id="my-product-title-slot-${i}" class="my-title-input"
-              data-slot-index="${i}"
-              placeholder="Tên SP (không lấy từ trang)…" autocomplete="off" />
-            <p class="my-title-position" id="my-title-position-slot-${i}"
-              data-slot-index="${i}" hidden></p>
-          </div>`).join('');
-    return `
-        <div class="my-title-section">
-          <span class="my-title-heading">Tên sản phẩm của tôi</span>
-          ${inputs}
-        </div>`;
 }
 
 function escapeHtml(s) {
@@ -1153,32 +1152,110 @@ const PANEL_STYLES = `
     padding: 8px 10px 6px;
     flex-shrink: 0;
   }
+  .my-title-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .my-title-heading {
     font-size: 11px;
     font-weight: 700;
     color: #374151;
   }
-  .my-title-bar {
+  .my-title-clear-btn {
+    padding: 2px 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    color: #6b7280;
+    cursor: pointer;
+  }
+  .my-title-clear-btn:hover {
+    color: #b91c1c;
+    border-color: #fecaca;
+    background: #fef2f2;
+  }
+  .my-title-badges {
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  .my-title-empty {
+    margin: 0;
+    font-size: 10px;
+    color: #9ca3af;
+    font-style: italic;
+  }
+  .my-title-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .my-title-chip-row {
+    display: flex;
+    align-items: flex-start;
     gap: 4px;
-    flex-shrink: 0;
   }
-  .my-title-input {
-    width: 100%;
-    padding: 6px 8px;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
+  .my-title-chip-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
     font-size: 11px;
-    color: #111827;
-    background: #fff;
+    line-height: 1.35;
+    color: #1e3a8a;
+    background: #eff6ff;
   }
-  .my-title-input:focus {
+  .my-title-chip-input:focus {
     outline: none;
     border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+    background: #fff;
   }
-  .my-title-input::placeholder { color: #9ca3af; }
+  .my-title-chip-remove {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fff;
+    color: #6b7280;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .my-title-chip-remove:hover {
+    color: #b91c1c;
+    border-color: #fecaca;
+    background: #fef2f2;
+  }
+  .my-title-paste {
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 8px;
+    border: 1px dashed #d1d5db;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #111827;
+    background: #fafafa;
+    resize: vertical;
+  }
+  .my-title-paste:focus {
+    outline: none;
+    border-color: #2563eb;
+    border-style: solid;
+    background: #fff;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  .my-title-paste::placeholder { color: #9ca3af; }
   .my-title-position {
     margin: 0;
     font-size: 10px;

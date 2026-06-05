@@ -148,6 +148,28 @@ Yêu cầu: phân tích vị trí #${rank} trang ${page} so với các SP phía 
 
 /**
  * @param {Record<string, unknown>[]} rows
+ * @param {string[]} productTitles
+ */
+export function resolveProductDisplayPositionsForTitles(rows, productTitles) {
+    return productTitles
+        .map((title) =>
+            String(title ?? '')
+                .replace(/\r\n|\r|\n/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+        )
+        .filter(Boolean)
+        .map((title, index) => ({
+            index,
+            title,
+            position: resolveMyProductDisplayPosition(rows, title, {
+                shopLabel: `SP ${index + 1}`,
+            }),
+        }));
+}
+
+/**
+ * @param {Record<string, unknown>[]} rows
  * @param {Record<string, string>} titlesByShopId — shopId → tên SP
  * @param {{ shopId: string, brand: string }[]} shops
  */

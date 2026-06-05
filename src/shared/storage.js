@@ -82,7 +82,8 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 function buildRewriteScopePreamble(scope) {
   if (scope === "title") {
     return `=== PHẠM VI YÊU CẦU ===
-Chỉ viết lại TIÊU ĐỀ Shopee. KHÔNG sửa mô tả — trường description trong JSON phải giữ nguyên y hệt "Mô tả gốc" bên dưới.`;
+Chỉ viết lại TIÊU ĐỀ Shopee. KHÔNG sửa mô tả — trường description trong JSON phải giữ nguyên y hệt "Mô tả gốc" bên dưới.
+Tiêu đề được phép dùng dấu / (vd Combo/Bộ, A4/A5) — không loại bỏ chỉ vì là ký tự đặc biệt.`;
   }
   if (scope === "description") {
     return `=== PHẠM VI YÊU CẦU ===
@@ -161,7 +162,9 @@ Công thức: [Từ khóa vàng] + [Loại SP] + [Đặc tính kỹ thuật] + [
 - Từ khóa vàng + mã/model đặt sớm trong tiêu đề để khách nhận ra ngay loại sản phẩm.
 - Dài khuyến nghị 80-120 ký tự, viết hoa chữ cái đầu (không IN HOA cả dòng).
 - Khớp ảnh sản phẩm; ghi rõ Combo/Bộ nếu là set.
-- Cấm: emoji, #@$%…, Freeship/Giảm giá/Bán chạy/Hot/Top/Rẻ nhất, nhồi từ khóa lạ.
+- Cho phép dấu / trong tiêu đề khi tách cụm (vd Combo/Bộ, khổ A4/A5, Thương hiệu/Model) — giữ nếu tiêu đề gốc hoặc ngành hàng thường dùng; không thay / bằng dấu cách hoặc gạch ngang một cách tùy tiện.
+- Cấm emoji và ký tự đặc biệt: # @ $ % ^ * < > ! (không cấm dấu /).
+- Cấm cụm khuyến mãi: Freeship, Giảm giá, Bán chạy, Hot, Top, Rẻ nhất; không nhồi từ khóa lạ.
 
 === MÔ TẢ SHOPEE (tối đa 3000 ký tự, text thuần) ===
 Cấu trúc 4 phần, xuống dòng rõ (dùng \\n trong JSON):
@@ -365,7 +368,13 @@ export async function saveSettings(partial) {
 export function patchLegacyPromptWording(template) {
   return template
     .replace(/dùng nháy đơn hoặc viết không dấu/gi, "dùng nháy đơn thay thế")
-    .replace(/#tukhoa1\s+#tukhoa2/gi, "#bútbi #tậpviết");
+    .replace(/#tukhoa1\s+#tukhoa2/gi, "#bútbi #tậpviết")
+    .replace(
+      /- Cấm: emoji, #@\$%…, Freeship\/Giảm giá\/Bán chạy\/Hot\/Top\/Rẻ nhất, nhồi từ khóa lạ\./gi,
+      `- Cho phép dấu / trong tiêu đề khi tách cụm (vd Combo/Bộ, khổ A4/A5, Thương hiệu/Model) — giữ nếu tiêu đề gốc hoặc ngành hàng thường dùng; không thay / bằng dấu cách hoặc gạch ngang một cách tùy tiện.
+- Cấm emoji và ký tự đặc biệt: # @ $ % ^ * < > ! (không cấm dấu /).
+- Cấm cụm khuyến mãi: Freeship, Giảm giá, Bán chạy, Hot, Top, Rẻ nhất; không nhồi từ khóa lạ.`,
+    );
 }
 
 function ensureShopBlockInTemplate(template) {
