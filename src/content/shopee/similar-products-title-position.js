@@ -69,9 +69,15 @@ function titleMatchScore(query, rowTitle) {
 /**
  * @param {Record<string, unknown>[]} rows
  * @param {string} myProductTitle
+ * @param {{ shopLabel?: string }} [options]
  */
-export function resolveMyProductDisplayPosition(rows, myProductTitle = '') {
+export function resolveMyProductDisplayPosition(rows, myProductTitle = '', options = {}) {
     const query = String(myProductTitle ?? '').trim();
+    const shopLabel = String(options.shopLabel ?? '').trim();
+    const blockTitle = shopLabel
+        ? `VỊ TRÍ HIỂN THỊ SP — ${shopLabel}`
+        : 'VỊ TRÍ HIỂN THỊ SP CỦA TÔI';
+
     if (!query) {
         return {
             found: false,
@@ -79,6 +85,7 @@ export function resolveMyProductDisplayPosition(rows, myProductTitle = '') {
             uiText: '',
             promptBlock: '',
             matchedRow: null,
+            shopLabel,
         };
     }
 
@@ -89,10 +96,12 @@ export function resolveMyProductDisplayPosition(rows, myProductTitle = '') {
             empty: false,
             uiText: NOT_FOUND_MESSAGE,
             matchedRow: null,
-            promptBlock: `=== VỊ TRÍ HIỂN THỊ SP CỦA TÔI (trong bảng kết quả đã thu thập) ===
+            shopLabel,
+            promptBlock: `=== ${blockTitle} (trong bảng kết quả đã thu thập) ===
+Tên đã nhập: ${query}
 ${NOT_FOUND_MESSAGE}
 
-Lưu ý cho phân tích: SP của tôi chưa khớp tên nào trong bảng đối thủ — có thể chưa nằm trong trang đã quét hoặc tên khác trên Shopee. Vẫn đề xuất tiêu đề tối ưu dựa trên đối thủ.`,
+Lưu ý cho phân tích: SP chưa khớp tên nào trong bảng đối thủ — có thể chưa nằm trong trang đã quét hoặc tên khác trên Shopee. Vẫn đề xuất tiêu đề tối ưu dựa trên đối thủ và tên người bán nhập.`,
         };
     }
 
@@ -106,11 +115,12 @@ Lưu ý cho phân tích: SP của tôi chưa khớp tên nào trong bảng đố
     const rank = best.rank ?? '—';
     const matchedTitle = String(best.title ?? '').trim();
 
+    const prefix = shopLabel ? `${shopLabel}: ` : '';
     const uiText =
-        `Vị trí hiển thị: ${formatPositionHighlightLabel({ page, rank, gridVisible })}` +
+        `${prefix}Vị trí hiển thị: ${formatPositionHighlightLabel({ page, rank, gridVisible })}` +
         ' — bấm để xem trên trang';
 
-    const promptBlock = `=== VỊ TRÍ HIỂN THỊ SP CỦA TÔI (trong bảng kết quả đã thu thập) ===
+    const promptBlock = `=== ${blockTitle} (trong bảng kết quả đã thu thập) ===
 Trang: ${page}
 Thứ tự trên trang (#): ${rank}
 Đoạn tiêu đề hiện trên lưới Shopee: ${gridVisible || '—'}
@@ -132,5 +142,23 @@ Yêu cầu: phân tích vị trí #${rank} trang ${page} so với các SP phía 
         itemId: best.itemId ?? '',
         shopId: best.shopId ?? '',
         matchedRow: best,
+        shopLabel,
     };
+}
+
+/**
+ * @param {Record<string, unknown>[]} rows
+ * @param {Record<string, string>} titlesByShopId — shopId → tên SP
+ * @param {{ shopId: string, brand: string }[]} shops
+ */
+export function resolveMultiProductDisplayPositions(rows, titlesByShopId, shops) {
+    return shops.map((shop) => ({
+        shop,
+        title: String(titlesByShopId[shop.shopId] ?? '').trim(),
+        position: resolveMyProductDisplayPosition(
+            rows,
+            titlesByShopId[shop.shopId] ?? '',
+            { shopLabel: shop.brand },
+        ),
+    }));
 }

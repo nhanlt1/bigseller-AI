@@ -1,9 +1,13 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
+import { isSiblingShopId, SIBLING_SHOPEE_SHOPS } from '../../shared/shop-names.js';
 import { copyTableToClipboard, downloadCsv } from '../../shared/table-export.js';
 import { FAB_IMAGE_RIGHT_PX, FAB_ROW_BOTTOM_PX, FAB_SIZE_PX } from '../shared/panel.js';
 import { buildSimilarProductsTitleResearchPrompt } from './similar-products-title-prompt.js';
 import { focusProductCardForRow } from './similar-products-card-focus.js';
-import { resolveMyProductDisplayPosition } from './similar-products-title-position.js';
+import {
+    getMatchedResearchRow,
+    resolveMyProductDisplayPosition,
+} from './similar-products-title-position.js';
 import {
     RESEARCH_EXPORT_COLUMNS,
     RESEARCH_TABLE_COLUMNS,
@@ -13,8 +17,13 @@ import {
 
 const FAB_ID = 'bigseller-ai-similar-research-fab';
 const PANEL_HOST_ID = 'bigseller-ai-similar-research-host';
+const SIDEBAR_WIDTH_KEY = 'bigseller-ai-similar-sidebar-width';
+const SIDEBAR_DISMISSED_KEY = 'bigseller-ai-similar-sidebar-dismissed';
+const SIDEBAR_MIN_WIDTH = 300;
+const SIDEBAR_DEFAULT_WIDTH = 420;
 
 let panelInstance = null;
+let researchFabEl = null;
 let lastAutoIngestFingerprint = '';
 let autoCollectScheduleTimer = null;
 let navigationWatchInstalled = false;
@@ -30,41 +39,195 @@ const SIMILAR_PAGE_READY_SELECTORS = [
     '.rBfdm_.row',
 ];
 
-const MY_TITLE_STORAGE_PREFIX = 'bigseller-ai-my-product-title:';
-const MY_TITLE_GLOBAL_KEY = 'bigseller-ai-my-product-title-global';
+const MY_TITLE_SLOT_COUNT = 2;
+const MY_TITLE_SLOT_SESSION_PREFIX = 'bigseller-ai-my-product-title-slot:';
+const MY_TITLE_SLOT_GLOBAL_PREFIX = 'bigseller-ai-my-product-title-global-slot:';
+const MY_TITLE_LEGACY_PREFIX = 'bigseller-ai-my-product-title:';
+const MY_TITLE_LEGACY_GLOBAL_KEY = 'bigseller-ai-my-product-title-global';
+const MY_TITLE_SESSION_PREFIX = 'bigseller-ai-my-product-title-shop:';
+const MY_TITLE_GLOBAL_PREFIX = 'bigseller-ai-my-product-title-global-shop:';
 
-/** @type {{ sessionKey: string, rows: Record<string, unknown>[], seenKeys: Set<string>, myProductTitle: string }} */
+function emptyProductTitles() {
+    return Object.fromEntries(
+        SIBLING_SHOPEE_SHOPS.map((s) => [s.shopId, '']),
+    );
+}
+
+function emptyProductTitleSlots() {
+    return Array(MY_TITLE_SLOT_COUNT).fill('');
+}
+
+/** @type {{ sessionKey: string, rows: Record<string, unknown>[], seenKeys: Set<string>, myProductTitleSlots: string[] }} */
 const researchStore = {
     sessionKey: '',
     rows: [],
     seenKeys: new Set(),
-    myProductTitle: '',
+    myProductTitleSlots: emptyProductTitleSlots(),
 };
 
-function myTitleStorageKey(sessionKey) {
-    return `${MY_TITLE_STORAGE_PREFIX}${sessionKey}`;
+function myTitleStorageKey(sessionKey, shopId) {
+    return `${MY_TITLE_SESSION_PREFIX}${shopId}:${sessionKey}`;
 }
 
-function loadMyProductTitle(sessionKey) {
-    try {
-        const perSession = sessionStorage.getItem(myTitleStorageKey(sessionKey));
-        if (perSession != null && perSession !== '')
-            return perSession;
-        return localStorage.getItem(MY_TITLE_GLOBAL_KEY) ?? '';
-    }
-    catch {
-        return '';
-    }
+function myTitleGlobalKey(shopId) {
+    return `${MY_TITLE_GLOBAL_PREFIX}${shopId}`;
 }
 
-function saveMyProductTitle(sessionKey, title) {
+function loadMyProductTitles(sessionKey) {
+    const titles = emptyProductTitles();
+    for (const shop of SIBLING_SHOPEE_SHOPS) {
+        try {
+            const perSession = sessionStorage.getItem(
+                myTitleStorageKey(sessionKey, shop.shopId),
+            );
+            if (perSession != null && perSession !== '') {
+                titles[shop.shopId] = perSession;
+                continue;
+            }
+            if (shop.shopId === SIBLING_SHOPEE_SHOPS[0].shopId) {
+                const legacySession = sessionStorage.getItem(
+                    `${MY_TITLE_LEGACY_PREFIX}${sessionKey}`,
+                );
+                if (legacySession) {
+                    titles[shop.shopId] = legacySession;
+                    continue;
+                }
+                const legacyGlobal = localStorage.getItem(MY_TITLE_LEGACY_GLOBAL_KEY);
+                if (legacyGlobal) {
+                    titles[shop.shopId] = legacyGlobal;
+                    continue;
+                }
+            }
+            const global = localStorage.getItem(myTitleGlobalKey(shop.shopId));
+            if (global)
+                titles[shop.shopId] = global;
+        }
+        catch {
+            /* private mode */
+        }
+    }
+    return titles;
+}
+
+function myTitleSlotSessionKey(sessionKey, slotIndex) {
+    return `${MY_TITLE_SLOT_SESSION_PREFIX}${slotIndex}:${sessionKey}`;
+}
+
+function myTitleSlotGlobalKey(slotIndex) {
+    return `${MY_TITLE_SLOT_GLOBAL_PREFIX}${slotIndex}`;
+}
+
+function loadMyProductTitleSlots(sessionKey) {
+    const slots = emptyProductTitleSlots();
+    for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+        try {
+            const perSession = sessionStorage.getItem(
+                myTitleSlotSessionKey(sessionKey, i),
+            );
+            if (perSession != null) {
+                slots[i] = perSession;
+                continue;
+            }
+            const global = localStorage.getItem(myTitleSlotGlobalKey(i));
+            if (global != null)
+                slots[i] = global;
+        }
+        catch {
+            /* private mode */
+        }
+    }
+    if (!slots.some((s) => String(s).trim())) {
+        const legacy = loadMyProductTitles(sessionKey);
+        let idx = 0;
+        for (const shop of SIBLING_SHOPEE_SHOPS) {
+            const title = String(legacy[shop.shopId] ?? '').trim();
+            if (title && idx < MY_TITLE_SLOT_COUNT)
+                slots[idx++] = title;
+        }
+    }
+    return slots;
+}
+
+function saveMyProductTitleSlot(sessionKey, slotIndex, title) {
     try {
-        sessionStorage.setItem(myTitleStorageKey(sessionKey), title);
+        sessionStorage.setItem(
+            myTitleSlotSessionKey(sessionKey, slotIndex),
+            title,
+        );
         if (String(title ?? '').trim())
-            localStorage.setItem(MY_TITLE_GLOBAL_KEY, title);
+            localStorage.setItem(myTitleSlotGlobalKey(slotIndex), title);
     }
     catch {
         /* private mode */
+    }
+}
+
+/** Gán tên SP vào shop theo dòng khớp trong bảng; chưa khớp thì gán shop trống (chỉ cho prompt) */
+function deriveTitlesByShopFromSlots(rows, slots) {
+    const titles = emptyProductTitles();
+    const unmatched = [];
+    for (const raw of slots) {
+        const value = String(raw ?? '').trim();
+        if (!value)
+            continue;
+        const row = getMatchedResearchRow(rows, value);
+        const shopId = String(row?.shopId ?? '').trim();
+        if (shopId && isSiblingShopId(shopId))
+            titles[shopId] = value;
+        else
+            unmatched.push(value);
+    }
+    for (const value of unmatched) {
+        const freeShop = SIBLING_SHOPEE_SHOPS.find(
+            (s) => !String(titles[s.shopId] ?? '').trim(),
+        );
+        if (freeShop)
+            titles[freeShop.shopId] = value;
+    }
+    return titles;
+}
+
+function getSidebarMaxWidth() {
+    return Math.min(window.innerWidth * 0.5, 720);
+}
+
+function clampSidebarWidth(px) {
+    return Math.max(
+        SIDEBAR_MIN_WIDTH,
+        Math.min(getSidebarMaxWidth(), Number(px) || SIDEBAR_DEFAULT_WIDTH),
+    );
+}
+
+function loadSidebarWidth() {
+    try {
+        const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+        if (raw)
+            return clampSidebarWidth(Number.parseInt(raw, 10));
+    }
+    catch {
+        /* private mode */
+    }
+    return SIDEBAR_DEFAULT_WIDTH;
+}
+
+function shouldAutoOpenSidebar() {
+    try {
+        return sessionStorage.getItem(SIDEBAR_DISMISSED_KEY) !== '1';
+    }
+    catch {
+        return true;
+    }
+}
+
+function updateFabPosition() {
+    const fab = researchFabEl ?? document.getElementById(FAB_ID);
+    if (!fab)
+        return;
+    if (panelInstance?.visible) {
+        fab.style.right = `${panelInstance.getSidebarWidth() + 12}px`;
+    }
+    else {
+        fab.style.right = `${FAB_IMAGE_RIGHT_PX}px`;
     }
 }
 
@@ -100,11 +263,18 @@ function ensureResearchSession() {
     researchStore.sessionKey = sessionKey;
     researchStore.rows = [];
     researchStore.seenKeys = new Set();
-    const loaded = loadMyProductTitle(sessionKey);
-    if (loaded || !researchStore.myProductTitle.trim())
-        researchStore.myProductTitle = loaded;
+    const loaded = loadMyProductTitleSlots(sessionKey);
+    researchStore.myProductTitleSlots = loaded;
     lastAutoIngestFingerprint = '';
     panelInstance?.applyMyProductTitleToInput();
+    try {
+        sessionStorage.removeItem(SIDEBAR_DISMISSED_KEY);
+    }
+    catch {
+        /* private mode */
+    }
+    if (panelInstance && shouldAutoOpenSidebar() && !panelInstance.visible)
+        panelInstance.open();
 }
 
 function mergeResearchRows(newRows) {
@@ -248,8 +418,9 @@ class SimilarResearchPanel {
     shadow;
     visible = false;
     compact = false;
-    expanded = false;
-    lastPosition = null;
+    sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
+    /** @type {Record<string, ReturnType<import('./similar-products-title-position.js')['resolveMyProductDisplayPosition']>>} */
+    lastPositions = {};
     rows = researchStore.rows;
 
     constructor() {
@@ -258,77 +429,103 @@ class SimilarResearchPanel {
             existing.remove();
         this.host = document.createElement('div');
         this.host.id = PANEL_HOST_ID;
-        this.host.style.display = 'none';
+        this.host.setAttribute('data-open', '0');
         this.shadow = this.host.attachShadow({ mode: 'closed' });
         document.body.appendChild(this.host);
+        this.applySidebarWidth(loadSidebarWidth());
         this.render();
+    }
+
+    getSidebarWidth() {
+        return this.sidebarWidth;
+    }
+
+    applySidebarWidth(px) {
+        this.sidebarWidth = clampSidebarWidth(px);
+        this.host.style.setProperty('--sidebar-width', `${this.sidebarWidth}px`);
+        try {
+            localStorage.setItem(SIDEBAR_WIDTH_KEY, String(this.sidebarWidth));
+        }
+        catch {
+            /* private mode */
+        }
+        updateFabPosition();
     }
 
     setCompact(compact) {
         this.compact = compact;
-        if (compact) {
+        if (compact)
             this.host.setAttribute('data-compact', '1');
-            this.setExpanded(false);
-        }
-        else {
+        else
             this.host.removeAttribute('data-compact');
-        }
         const panelEl = this.shadow.querySelector('.panel');
         panelEl?.classList.toggle('compact', compact);
         const expandBtn = this.shadow.getElementById('expand-btn');
         if (expandBtn)
             expandBtn.hidden = !compact;
-        this.updateMaximizeButton();
     }
 
-    setExpanded(expanded) {
-        this.expanded = expanded;
-        if (expanded)
-            this.host.setAttribute('data-expanded', '1');
-        else
-            this.host.removeAttribute('data-expanded');
-        this.updateMaximizeButton();
-    }
-
-    updateMaximizeButton() {
-        const btn = this.shadow.getElementById('maximize-btn');
-        if (!btn)
+    open() {
+        if (this.visible)
             return;
-        btn.hidden = this.compact;
-        btn.textContent = this.expanded ? '⊟' : '⛶';
-        btn.title = this.expanded ? 'Thu nhỏ bảng' : 'Phóng to bảng';
+        this.visible = true;
+        this.host.setAttribute('data-open', '1');
+        ensureResearchSession();
+        this.applyMyProductTitleToInput();
+        scheduleAutoCollect();
+        updateFabPosition();
+        const total = researchStore.rows.length;
+        this.syncFromStore(
+            total > 0
+                ? `Bảng ${total} dòng — tự động lấy trang ${getCurrentPageNumber()} đang xem.`
+                : `Đang chờ trang ${getCurrentPageNumber()} tải xong…`,
+        );
+    }
+
+    close(dismiss = true) {
+        if (!this.visible)
+            return;
+        this.persistMyProductTitleFromInput();
+        this.visible = false;
+        this.host.setAttribute('data-open', '0');
+        this.setCompact(false);
+        if (dismiss) {
+            try {
+                sessionStorage.setItem(SIDEBAR_DISMISSED_KEY, '1');
+            }
+            catch {
+                /* private mode */
+            }
+        }
+        updateFabPosition();
     }
 
     persistMyProductTitleFromInput() {
-        const el = this.shadow.getElementById('my-product-title');
-        if (!el)
-            return;
-        const value = el.value;
-        if (value === researchStore.myProductTitle)
-            return;
-        researchStore.myProductTitle = value;
-        if (researchStore.sessionKey)
-            saveMyProductTitle(researchStore.sessionKey, value);
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            const el = this.shadow.getElementById(`my-product-title-slot-${i}`);
+            if (!el)
+                continue;
+            const value = el.value;
+            if (value === (researchStore.myProductTitleSlots[i] ?? ''))
+                continue;
+            researchStore.myProductTitleSlots[i] = value;
+            if (researchStore.sessionKey)
+                saveMyProductTitleSlot(researchStore.sessionKey, i, value);
+        }
     }
 
     toggle() {
-        this.visible = !this.visible;
-        this.host.style.display = this.visible ? 'block' : 'none';
-        if (!this.visible) {
-            this.setCompact(false);
-            this.setExpanded(false);
-        }
         if (this.visible) {
-            ensureResearchSession();
-            this.applyMyProductTitleToInput();
-            scheduleAutoCollect();
-            const total = researchStore.rows.length;
-            this.syncFromStore(
-                total > 0
-                    ? `Bảng ${total} dòng — tự động lấy trang ${getCurrentPageNumber()} đang xem.`
-                    : `Đang chờ trang ${getCurrentPageNumber()} tải xong…`,
-            );
+            this.close(true);
+            return;
         }
+        try {
+            sessionStorage.removeItem(SIDEBAR_DISMISSED_KEY);
+        }
+        catch {
+            /* private mode */
+        }
+        this.open();
     }
 
     syncFromStore(statusText) {
@@ -337,67 +534,84 @@ class SimilarResearchPanel {
         this.rows = researchStore.rows;
         this.renderTable();
         this.applyMyProductTitleToInput();
-        this.updateMyTitlePositionHint();
+        this.updateMyTitlePositionHints();
         if (statusText)
             this.setStatus(statusText);
     }
 
     applyMyProductTitleToInput() {
-        const el = this.shadow.getElementById('my-product-title');
-        if (!el)
-            return;
-        const saved = researchStore.myProductTitle ?? '';
-        if (saved && el.value !== saved)
-            el.value = saved;
-        else if (!saved && el.value.trim()) {
-            researchStore.myProductTitle = el.value;
-            if (researchStore.sessionKey)
-                saveMyProductTitle(researchStore.sessionKey, el.value);
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            const el = this.shadow.getElementById(`my-product-title-slot-${i}`);
+            if (!el)
+                continue;
+            const saved = researchStore.myProductTitleSlots[i] ?? '';
+            if (saved && el.value !== saved)
+                el.value = saved;
+            else if (!saved && el.value.trim()) {
+                researchStore.myProductTitleSlots[i] = el.value;
+                if (researchStore.sessionKey)
+                    saveMyProductTitleSlot(researchStore.sessionKey, i, el.value);
+            }
         }
     }
 
-    getMyProductTitle() {
-        const fromInput =
-            this.shadow.getElementById('my-product-title')?.value?.trim() ?? '';
-        return fromInput || researchStore.myProductTitle.trim();
+    getMyProductTitleSlots() {
+        const slots = [...researchStore.myProductTitleSlots];
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            const fromInput =
+                this.shadow.getElementById(`my-product-title-slot-${i}`)?.value ?? '';
+            slots[i] = fromInput;
+        }
+        return slots;
     }
 
-    onMyProductTitleInput(value) {
-        ensureResearchSession();
-        researchStore.myProductTitle = value;
-        saveMyProductTitle(researchStore.sessionKey, value);
-        this.updateMyTitlePositionHint();
-    }
-
-    updateMyTitlePositionHint() {
-        const el = this.shadow.getElementById('my-title-position');
-        if (!el)
-            return;
-        const position = resolveMyProductDisplayPosition(
+    getMyProductTitles() {
+        return deriveTitlesByShopFromSlots(
             researchStore.rows,
-            this.getMyProductTitle(),
+            this.getMyProductTitleSlots(),
         );
-        this.lastPosition = position;
-        if (position.empty) {
-            el.textContent = '';
-            el.hidden = true;
-            el.dataset.clickable = '0';
-            return;
-        }
-        el.hidden = false;
-        el.textContent = position.uiText;
-        el.dataset.found = position.found ? '1' : '0';
-        el.dataset.clickable = position.found ? '1' : '0';
-        el.title = position.found
-            ? 'Bấm để cuộn tới SP và highlight trên trang Shopee'
-            : '';
     }
 
-    async onPositionHintClick() {
-        const position = this.lastPosition ??
+    onMyProductTitleInput(slotIndex, value) {
+        ensureResearchSession();
+        researchStore.myProductTitleSlots[slotIndex] = value;
+        saveMyProductTitleSlot(researchStore.sessionKey, slotIndex, value);
+        this.updateMyTitlePositionHints();
+    }
+
+    updateMyTitlePositionHints() {
+        const slots = this.getMyProductTitleSlots();
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            const el = this.shadow.getElementById(`my-title-position-slot-${i}`);
+            if (!el)
+                continue;
+            const position = resolveMyProductDisplayPosition(
+                researchStore.rows,
+                slots[i] ?? '',
+            );
+            this.lastPositions[i] = position;
+            if (position.empty) {
+                el.textContent = '';
+                el.hidden = true;
+                el.dataset.clickable = '0';
+                continue;
+            }
+            el.hidden = false;
+            el.textContent = position.uiText;
+            el.dataset.found = position.found ? '1' : '0';
+            el.dataset.clickable = position.found ? '1' : '0';
+            el.title = position.found
+                ? 'Bấm để cuộn tới SP và highlight trên trang Shopee'
+                : '';
+        }
+    }
+
+    async onPositionHintClick(slotIndex) {
+        const slots = this.getMyProductTitleSlots();
+        const position = this.lastPositions[slotIndex] ??
             resolveMyProductDisplayPosition(
                 researchStore.rows,
-                this.getMyProductTitle(),
+                slots[slotIndex] ?? '',
             );
         if (!position?.found || !position.matchedRow) {
             this.setStatus('Không tìm thấy vị trí hiển thị trên trang.');
@@ -424,11 +638,12 @@ class SimilarResearchPanel {
     render() {
         this.shadow.innerHTML = `
       <style>${PANEL_STYLES}</style>
-      <div class="panel" role="dialog" aria-label="Nghiên cứu SP tương tự">
+      <div class="sidebar-shell">
+        <div class="resize-handle" id="resize-handle" title="Kéo để chỉnh độ rộng" aria-hidden="true"></div>
+        <div class="panel" role="dialog" aria-label="Nghiên cứu SP tương tự">
         <header class="header">
           <span class="title">Nghiên cứu SP tương tự</span>
           <div class="header-actions">
-            <button type="button" class="btn-expand" id="maximize-btn" title="Phóng to bảng">⛶</button>
             <button type="button" class="btn-expand" id="expand-btn" hidden title="Mở lại bảng sau highlight">⤢</button>
             <button type="button" class="btn-close" id="close-btn" title="Đóng">×</button>
           </div>
@@ -438,17 +653,15 @@ class SimilarResearchPanel {
           <button type="button" class="btn sm" id="copy-btn" disabled>Copy</button>
           <button type="button" class="btn sm" id="csv-btn" disabled>CSV</button>
         </div>
-        <label class="my-title-bar">
-          <span class="my-title-label">Tên sản phẩm của tôi</span>
-          <input type="text" id="my-product-title" class="my-title-input"
-            placeholder="Nhập tên SP hiện tại của bạn (không lấy từ trang)…" autocomplete="off" />
-          <p class="my-title-position" id="my-title-position" hidden></p>
-        </label>
+        <div class="my-title-bars">
+          ${renderMyTitleBarsHtml()}
+        </div>
         <p class="status" id="status">Tự động lấy trang đang xem — sang trang 2, 3… thì cộng dồn.</p>
         <div class="body">
           <div class="table-scroll" id="table-scroll">
             <div class="table-wrap" id="table-wrap"></div>
           </div>
+        </div>
         </div>
       </div>
     `;
@@ -456,32 +669,62 @@ class SimilarResearchPanel {
         ensureResearchSession();
         this.applyMyProductTitleToInput();
         this.renderTable();
-        this.updateMyTitlePositionHint();
-        this.updateMaximizeButton();
+        this.updateMyTitlePositionHints();
+    }
+
+    bindResizeHandle() {
+        const handle = this.shadow.getElementById('resize-handle');
+        if (!handle)
+            return;
+        let dragging = false;
+        let startX = 0;
+        let startW = 0;
+        const onMove = (ev) => {
+            if (!dragging)
+                return;
+            const clientX = ev.touches?.[0]?.clientX ?? ev.clientX;
+            this.applySidebarWidth(startW + (startX - clientX));
+        };
+        const onUp = () => {
+            dragging = false;
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+        };
+        handle.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            dragging = true;
+            startX = ev.clientX;
+            startW = this.sidebarWidth;
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+        handle.addEventListener('touchstart', (ev) => {
+            dragging = true;
+            startX = ev.touches[0].clientX;
+            startW = this.sidebarWidth;
+            document.addEventListener('touchmove', onMove, { passive: true });
+            document.addEventListener('touchend', onUp);
+        }, { passive: true });
     }
 
     bindEvents() {
-        this.shadow.getElementById('my-product-title')?.addEventListener('input', (ev) => {
-            this.onMyProductTitleInput(ev.target.value);
-        });
-        this.shadow.getElementById('maximize-btn')?.addEventListener('click', () => {
-            this.setExpanded(!this.expanded);
-            this.setStatus(
-                this.expanded
-                    ? 'Đã phóng to bảng — bấm ⊟ để thu nhỏ.'
-                    : 'Đã thu nhỏ bảng.',
-            );
-        });
-        this.shadow.getElementById('my-title-position')?.addEventListener('click', () => {
-            void this.onPositionHintClick();
-        });
+        this.bindResizeHandle();
+        for (let i = 0; i < MY_TITLE_SLOT_COUNT; i++) {
+            this.shadow.getElementById(`my-product-title-slot-${i}`)?.addEventListener('input', (ev) => {
+                this.onMyProductTitleInput(i, ev.target.value);
+            });
+            this.shadow.getElementById(`my-title-position-slot-${i}`)?.addEventListener('click', () => {
+                void this.onPositionHintClick(i);
+            });
+        }
         this.shadow.getElementById('expand-btn')?.addEventListener('click', () => {
             this.setCompact(false);
             this.setStatus('Đã mở rộng bảng nghiên cứu.');
         });
         this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
-            this.visible = false;
-            this.host.style.display = 'none';
+            this.close(true);
         });
         this.shadow.getElementById('copy-btn')?.addEventListener('click', () => {
             void this.copyTable();
@@ -502,9 +745,13 @@ class SimilarResearchPanel {
             this.setStatus('Chưa có dữ liệu — đang chờ thu thập tự động.');
             return;
         }
+        const slots = this.getMyProductTitleSlots();
         const prompt = buildSimilarProductsTitleResearchPrompt(
             this.rows,
-            this.getMyProductTitle(),
+            this.getMyProductTitles(),
+            {
+                filledSlotCount: slots.filter((s) => String(s).trim()).length,
+            },
         );
         try {
             const result = await sendMessage({
@@ -592,7 +839,14 @@ class SimilarResearchPanel {
         ).join('');
         const body = this.rows
             .map((row) => {
-                const mainClass = row.kind === 'Chính' ? ' class="row-main"' : '';
+                const rowClasses = [];
+                if (row.kind === 'Chính')
+                    rowClasses.push('row-main');
+                if (isSiblingShopId(row.shopId))
+                    rowClasses.push('row-sibling-shop');
+                const classAttr = rowClasses.length
+                    ? ` class="${rowClasses.join(' ')}"`
+                    : '';
                 const cells = RESEARCH_TABLE_COLUMNS.map((c) => {
                     const v = row[c.key];
                     const cls = c.colClass ?? '';
@@ -601,7 +855,7 @@ class SimilarResearchPanel {
                         : escapeHtml(v);
                     return `<td class="${cls}">${text}</td>`;
                 }).join('');
-                return `<tr${mainClass}>${cells}</tr>`;
+                return `<tr${classAttr}>${cells}</tr>`;
             })
             .join('');
         wrap.innerHTML = `
@@ -639,6 +893,22 @@ function installTableScrollContainment(scrollEl) {
     );
 }
 
+function renderMyTitleBarsHtml() {
+    const inputs = Array.from({ length: MY_TITLE_SLOT_COUNT }, (_, i) => `
+          <div class="my-title-bar">
+            <input type="text" id="my-product-title-slot-${i}" class="my-title-input"
+              data-slot-index="${i}"
+              placeholder="Tên SP (không lấy từ trang)…" autocomplete="off" />
+            <p class="my-title-position" id="my-title-position-slot-${i}"
+              data-slot-index="${i}" hidden></p>
+          </div>`).join('');
+    return `
+        <div class="my-title-section">
+          <span class="my-title-heading">Tên sản phẩm của tôi</span>
+          ${inputs}
+        </div>`;
+}
+
 function escapeHtml(s) {
     return String(s ?? '')
         .replace(/&/g, '&amp;')
@@ -659,9 +929,13 @@ function getPanel() {
 
 export function mountSimilarProductsResearch() {
     if (document.getElementById(FAB_ID)) {
+        researchFabEl = document.getElementById(FAB_ID);
         installSimilarProductsNavigationWatch();
         installSimilarProductsCardWatch();
         installSimilarProductsScrollWatch();
+        const panel = getPanel();
+        if (shouldAutoOpenSidebar())
+            panel.open();
         return;
     }
     const btn = document.createElement('button');
@@ -690,6 +964,7 @@ export function mountSimilarProductsResearch() {
         alignItems: 'center',
         justifyContent: 'center',
     });
+    researchFabEl = btn;
     const panel = getPanel();
     btn.addEventListener('click', () => panel.toggle());
     document.body.appendChild(btn);
@@ -697,40 +972,54 @@ export function mountSimilarProductsResearch() {
     installSimilarProductsCardWatch();
     installSimilarProductsScrollWatch();
     scheduleAutoCollect();
+    if (shouldAutoOpenSidebar())
+        panel.open();
+    window.addEventListener('resize', () => {
+        panelInstance?.applySidebarWidth(panelInstance.getSidebarWidth());
+    });
 }
 
 const PANEL_STYLES = `
   :host {
     all: initial;
-    display: flex;
-    flex-direction: column;
+    display: block;
     position: fixed;
-    right: ${FAB_IMAGE_RIGHT_PX}px;
-    bottom: ${FAB_ROW_BOTTOM_PX + FAB_SIZE_PX + 12}px;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    width: var(--sidebar-width, ${SIDEBAR_DEFAULT_WIDTH}px);
     z-index: 2147483646;
-    width: min(520px, calc(100vw - 40px));
-    height: min(62vh, 480px);
-    max-height: min(62vh, 480px);
-    min-height: 220px;
-    pointer-events: auto;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    pointer-events: none;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     font-size: 13px;
     box-sizing: border-box;
   }
-  :host([data-expanded="1"]) {
-    width: min(96vw, 1180px);
-    height: min(88vh, 860px);
-    max-height: min(88vh, 860px);
-    right: 16px;
-    bottom: 16px;
-  }
-  :host([data-compact="1"]) {
-    width: min(300px, calc(100vw - 40px));
-    height: auto;
-    max-height: none;
-    min-height: 0;
+  :host([data-open="1"]) {
+    transform: translateX(0);
+    pointer-events: auto;
   }
   :host *, :host *::before, :host *::after { box-sizing: border-box; }
+  .sidebar-shell {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+  .resize-handle {
+    flex: 0 0 6px;
+    width: 6px;
+    height: 100%;
+    cursor: ew-resize;
+    background: transparent;
+    touch-action: none;
+  }
+  .resize-handle:hover,
+  .resize-handle:active {
+    background: rgba(37, 99, 235, 0.12);
+  }
   .panel {
     display: flex;
     flex-direction: column;
@@ -738,21 +1027,22 @@ const PANEL_STYLES = `
     width: 100%;
     height: 100%;
     min-height: 0;
+    min-width: 0;
     background: #fff;
     color: #111827;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.2);
-    border: 1px solid #e5e7eb;
+    border-radius: 0;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+    border-left: 1px solid #e5e7eb;
     overflow: hidden;
   }
   .panel.compact .toolbar,
-  .panel.compact .my-title-bar,
+  .panel.compact .my-title-bars,
   .panel.compact .status,
   .panel.compact .body {
     display: none;
   }
-  .panel.compact .header {
-    border-radius: 12px;
+  :host([data-compact="1"]) .resize-handle {
+    display: none;
   }
   .header {
     display: flex;
@@ -797,18 +1087,29 @@ const PANEL_STYLES = `
     border-bottom: 1px solid #e5e7eb;
     flex-shrink: 0;
   }
+  .my-title-bars {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .my-title-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px 6px;
+    flex-shrink: 0;
+  }
+  .my-title-heading {
+    font-size: 11px;
+    font-weight: 700;
+    color: #374151;
+  }
   .my-title-bar {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 6px 10px;
-    border-bottom: 1px solid #f3f4f6;
     flex-shrink: 0;
-  }
-  .my-title-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #374151;
   }
   .my-title-input {
     width: 100%;
@@ -945,15 +1246,10 @@ const PANEL_STYLES = `
   }
   .data-table th.col-num,
   .data-table td.col-num { text-align: center; }
-  :host([data-expanded="1"]) .data-table th.col-title,
-  :host([data-expanded="1"]) .data-table td.col-title {
-    min-width: 220px;
-    max-width: 420px;
-  }
   .data-table th.col-title,
   .data-table td.col-title {
     min-width: 140px;
-    max-width: 200px;
+    max-width: 280px;
     white-space: normal;
     word-wrap: break-word;
     overflow-wrap: anywhere;
@@ -967,6 +1263,12 @@ const PANEL_STYLES = `
   .data-table tr.row-main td {
     background: #eff6ff;
     font-weight: 600;
+  }
+  .data-table tr.row-sibling-shop td {
+    background: #ecfdf5;
+  }
+  .data-table tr.row-sibling-shop.row-main td {
+    background: #dbeafe;
   }
   .data-table a { color: #2563eb; }
   .empty {

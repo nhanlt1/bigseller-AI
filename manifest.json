@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BigSeller AI",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "SEO Gemini, tạo ảnh ChatGPT, áp dụng JSON vào form Shopee/BigSeller và tính giá bán.",
   "permissions": ["storage", "tabs", "scripting", "activeTab", "clipboardRead"],
   "host_permissions": [

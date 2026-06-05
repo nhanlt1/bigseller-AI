@@ -302,41 +302,46 @@ function mergeStoredSettings(stored) {
 }
 
 export async function getSettings() {
-  if (!isExtensionContextAlive()) {
-    notifyExtensionReloadNeeded();
-    return mergeStoredSettings(undefined);
-  }
-  const area = getSyncStorageArea();
-  if (area) {
-    try {
-      const result = await area.get(STORAGE_KEYS.settings);
-      const stored = result[STORAGE_KEYS.settings];
-      const merged = mergeStoredSettings(stored);
-      const rawTemplate = stored?.promptTemplate?.trim() ?? "";
-      if (
-        rawTemplate &&
-        rawTemplate !== merged.promptTemplate &&
-        hasDeprecatedPromptWording(rawTemplate)
-      ) {
-        void area.set({
-          [STORAGE_KEYS.settings]: { ...stored, ...merged },
-        });
-      }
-      return merged;
-    } catch (err) {
-      if (isExtensionContextInvalidated(err)) {
-        notifyExtensionReloadNeeded();
-        return mergeStoredSettings(undefined);
+  try {
+    if (!isExtensionContextAlive()) {
+      notifyExtensionReloadNeeded();
+      return mergeStoredSettings(undefined);
+    }
+    const area = getSyncStorageArea();
+    if (area) {
+      try {
+        const result = await area.get(STORAGE_KEYS.settings);
+        const stored = result[STORAGE_KEYS.settings];
+        const merged = mergeStoredSettings(stored);
+        const rawTemplate = stored?.promptTemplate?.trim() ?? "";
+        if (
+          rawTemplate &&
+          rawTemplate !== merged.promptTemplate &&
+          hasDeprecatedPromptWording(rawTemplate)
+        ) {
+          void area.set({
+            [STORAGE_KEYS.settings]: { ...stored, ...merged },
+          });
+        }
+        return merged;
+      } catch (err) {
+        if (isExtensionContextInvalidated(err)) {
+          notifyExtensionReloadNeeded();
+          return mergeStoredSettings(undefined);
+        }
       }
     }
-  }
-  try {
-    const fromBackground = await readSettingsViaBackground();
-    if (fromBackground) return fromBackground;
+    try {
+      const fromBackground = await readSettingsViaBackground();
+      if (fromBackground) return fromBackground;
+    } catch (err) {
+      if (isExtensionContextInvalidated(err)) notifyExtensionReloadNeeded();
+    }
+    return mergeStoredSettings(undefined);
   } catch (err) {
     if (isExtensionContextInvalidated(err)) notifyExtensionReloadNeeded();
+    return mergeStoredSettings(undefined);
   }
-  return mergeStoredSettings(undefined);
 }
 export async function saveSettings(partial) {
   if (!isExtensionContextAlive()) {

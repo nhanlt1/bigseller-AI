@@ -7,6 +7,10 @@ import { formatVnd } from '../../pricing/formula-engine.js';
 import { formatPriceInputValue, parsePriceInput } from '../../pricing/price-input.js';
 import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
 import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
+import {
+    isExtensionContextAlive,
+    notifyExtensionReloadNeeded,
+} from '../../shared/extension-context.js';
 import { getSettings, saveSettings } from '../../shared/storage.js';
 const POPUP_HOST_ID = 'bigseller-ai-pricing-popup-host';
 const FAB_ID = 'bigseller-ai-pricing-fab';
@@ -50,6 +54,11 @@ export class PricingPopup {
             void this.loadAndRender();
     }
     async loadAndRender() {
+        if (!isExtensionContextAlive()) {
+            notifyExtensionReloadNeeded();
+            this.renderReloadHint();
+            return;
+        }
         try {
             this.settings = await getSettings();
             this.applyCategoryCommissionFromPage();
@@ -58,8 +67,30 @@ export class PricingPopup {
             this.updateResults();
         }
         catch {
-            /* context invalidated — storage/messaging đã nhắc F5 */
+            notifyExtensionReloadNeeded();
+            this.renderReloadHint();
         }
+    }
+    renderReloadHint() {
+        this.host.style.display = this.visible ? 'block' : 'none';
+        this.shadow.innerHTML = `
+      <style>${POPUP_STYLES}</style>
+      <div class="pricing-popup" role="alert">
+        <header class="popup-header">
+          <span class="title">Tính giá</span>
+          <button type="button" class="btn-close" id="close-btn" title="Đóng">×</button>
+        </header>
+        <div class="popup-body">
+          <p class="cat-fee-warn" style="margin:12px">
+            Extension vừa được cập nhật hoặc reload. Vui lòng <strong>F5</strong> trang này rồi bấm nút $ lại.
+          </p>
+        </div>
+      </div>`;
+        this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
+            this.visible = false;
+            this.host.style.display = 'none';
+            this.host.dataset.open = 'false';
+        });
     }
     applyCategoryCommissionFromPage() {
         if (!this.settings)
@@ -230,17 +261,22 @@ export class PricingPopup {
     `;
     }
     categoryCommissionHintHtml() {
-        const path = readProductCategoryPath();
-        const lookup =
-            this.categoryLookup ??
-            (path ? lookupCategoryCommission(path) : null);
-        if (!lookup?.raw)
-            return '';
-        const pct = formatCommissionPercent(lookup.rate);
-        if (!pct) {
-            return `<p class="cat-fee-warn">Danh mục: ${this.escapeHtml(lookup.raw)} — chưa có trong biểu phí, nhập % thủ công.</p>`;
+        try {
+            const path = readProductCategoryPath();
+            const lookup =
+                this.categoryLookup ??
+                (path ? lookupCategoryCommission(path) : null);
+            if (!lookup?.raw)
+                return '';
+            const pct = formatCommissionPercent(lookup.rate);
+            if (!pct) {
+                return `<p class="cat-fee-warn">Danh mục: ${this.escapeHtml(lookup.raw)} — chưa có trong biểu phí, nhập % thủ công.</p>`;
+            }
+            return `<p class="cat-fee-auto">Danh mục SP: <strong>${this.escapeHtml(lookup.raw)}</strong> → phí cố định <strong class="fee-pct">${pct}</strong></p>`;
         }
-        return `<p class="cat-fee-auto">Danh mục SP: <strong>${this.escapeHtml(lookup.raw)}</strong> → phí cố định <strong class="fee-pct">${pct}</strong></p>`;
+        catch {
+            return '';
+        }
     }
     escapeHtml(text) {
         return text
@@ -693,12 +729,27 @@ const POPUP_STYLES = `
   }
 `;
 let popupInstance = null;
+
+function disposePricingPopup() {
+    popupInstance?.host?.remove();
+    popupInstance = null;
+}
+
 export function getPricingPopup() {
+    if (!isExtensionContextAlive()) {
+        disposePricingPopup();
+        notifyExtensionReloadNeeded();
+        return null;
+    }
     if (!popupInstance)
         popupInstance = new PricingPopup();
     return popupInstance;
 }
 export function mountPricingFab() {
+    if (!isExtensionContextAlive()) {
+        notifyExtensionReloadNeeded();
+        return;
+    }
     if (document.getElementById(FAB_ID))
         return;
     const btn = document.createElement('button');
@@ -727,8 +778,10 @@ export function mountPricingFab() {
         alignItems: 'center',
         justifyContent: 'center',
     });
-    const popup = getPricingPopup();
     btn.addEventListener('click', () => {
+        const popup = getPricingPopup();
+        if (!popup)
+            return;
         popup.toggle();
         const host = document.getElementById(POPUP_HOST_ID);
         if (host) {

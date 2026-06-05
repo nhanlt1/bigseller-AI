@@ -8,6 +8,35 @@ export const SHOPEE_SHOP_ID_TO_BRAND = {
   vpp_rosyruby: "Rosy Ruby Stationery",
 };
 
+/** Hai shop cùng hệ — shopId số từ URL sản phẩm Shopee */
+export const SIBLING_SHOPEE_SHOPS = [
+  {
+    shopId: "265264853",
+    account: "hangtieudung02",
+    brand: "NPP VĂN PHÒNG PHẨM THIÊN TRANG",
+  },
+  {
+    shopId: "590382538",
+    account: "vpp_rosyruby",
+    brand: "Rosy Ruby Stationery",
+  },
+];
+
+const SIBLING_SHOP_BY_NUMERIC_ID = Object.fromEntries(
+  SIBLING_SHOPEE_SHOPS.map((s) => [s.shopId, s]),
+);
+
+export function isSiblingShopId(shopId) {
+  const id = String(shopId ?? "").trim();
+  return id !== "" && id in SIBLING_SHOP_BY_NUMERIC_ID;
+}
+
+/** @returns {{ shopId: string, account: string, brand: string } | null} */
+export function resolveSiblingShopMeta(shopId) {
+  const id = String(shopId ?? "").trim();
+  return SIBLING_SHOP_BY_NUMERIC_ID[id] ?? null;
+}
+
 /** Tên shop cũ / shop khác — gỡ khỏi mô tả gốc và kết quả AI (trừ allowedShopName). */
 const SHOP_NAME_ALIASES = [
   "HAN.X - SHOP BÁCH HOÁ",
