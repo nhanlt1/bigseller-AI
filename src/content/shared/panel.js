@@ -18,7 +18,9 @@ export class FloatingPanel {
     statusEl;
     titlePreviewEl;
     descPreviewEl;
-    rewriteBtn;
+    rewriteTitleBtn;
+    rewriteDescBtn;
+    rewriteBothBtn;
     copyPromptBtn;
     applyBtn;
     lastResult = null;
@@ -38,7 +40,12 @@ export class FloatingPanel {
         void this.loadSettings();
     }
     async loadSettings() {
-        this.settings = await getSettings();
+        try {
+            this.settings = await getSettings();
+        }
+        catch {
+            /* storage/messaging đã nhắc F5 hoặc dùng mặc định */
+        }
     }
     setState(state, message, options) {
         this.state = state;
@@ -56,8 +63,11 @@ export class FloatingPanel {
         };
         this.statusEl.textContent = message ?? labels[state];
         this.statusEl.dataset.state = state;
-        this.rewriteBtn.disabled = state === 'busy';
-        this.copyPromptBtn.disabled = state === 'busy';
+        const busy = state === 'busy';
+        this.rewriteTitleBtn.disabled = busy;
+        this.rewriteDescBtn.disabled = busy;
+        this.rewriteBothBtn.disabled = busy;
+        this.copyPromptBtn.disabled = busy;
         this.applyBtn.disabled = false;
         this.applyBtn.title = this.waitingGemini
             ? 'Hủy chờ Gemini và áp dụng từ clipboard'
@@ -73,7 +83,7 @@ export class FloatingPanel {
         </header>
         <div class="panel-body">
           <p class="status" id="status">Sẵn sàng</p>
-          <p class="hint" id="flow-hint">Viết lại AI tự gửi Gemini — hoặc Copy prompt thủ công</p>
+          <p class="hint" id="flow-hint">Chọn phần cần viết lại — Gemini tự gửi và áp dụng vào form</p>
           <div class="preview">
             <label>Tiêu đề mới</label>
             <div class="preview-box" id="title-preview">—</div>
@@ -81,7 +91,11 @@ export class FloatingPanel {
             <div class="preview-box desc" id="desc-preview">—</div>
           </div>
           <div class="actions">
-            <button type="button" class="btn primary" id="rewrite-btn">Viết lại bằng AI</button>
+            <div class="rewrite-row">
+              <button type="button" class="btn primary compact" id="rewrite-title-btn">Tên SP</button>
+              <button type="button" class="btn primary compact" id="rewrite-desc-btn">Mô tả</button>
+              <button type="button" class="btn primary compact" id="rewrite-both-btn">Tên + mô tả</button>
+            </div>
             <button type="button" class="btn" id="copy-prompt-btn">Copy prompt</button>
             <button type="button" class="btn" id="apply-btn" title="Áp dụng JSON từ clipboard vào form">Áp dụng vào form</button>
           </div>
@@ -91,13 +105,17 @@ export class FloatingPanel {
         this.statusEl = this.shadow.getElementById('status');
         this.titlePreviewEl = this.shadow.getElementById('title-preview');
         this.descPreviewEl = this.shadow.getElementById('desc-preview');
-        this.rewriteBtn = this.shadow.getElementById('rewrite-btn');
+        this.rewriteTitleBtn = this.shadow.getElementById('rewrite-title-btn');
+        this.rewriteDescBtn = this.shadow.getElementById('rewrite-desc-btn');
+        this.rewriteBothBtn = this.shadow.getElementById('rewrite-both-btn');
         this.copyPromptBtn = this.shadow.getElementById('copy-prompt-btn');
         this.applyBtn = this.shadow.getElementById('apply-btn');
         this.shadow.getElementById('close-btn').addEventListener('click', () => {
             this.host.style.display = 'none';
         });
-        this.rewriteBtn.addEventListener('click', () => void this.handleRewrite());
+        this.rewriteTitleBtn.addEventListener('click', () => void this.handleRewrite('title'));
+        this.rewriteDescBtn.addEventListener('click', () => void this.handleRewrite('description'));
+        this.rewriteBothBtn.addEventListener('click', () => void this.handleRewrite('both'));
         this.copyPromptBtn.addEventListener('click', () => void this.handleCopyPrompt());
         this.applyBtn.addEventListener('click', () => void this.handleApply());
     }
@@ -108,14 +126,34 @@ export class FloatingPanel {
         const platform = this.adapter.platform ?? 'shopee';
         return buildPromptProductContext(product, platform);
     }
-    async handleRewrite() {
+    async handleRewrite(scope = 'both') {
         const ctx = this.promptContextFromPage();
         if (!ctx) {
             this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
             return;
         }
+        if (scope === 'title' && !ctx.title?.trim()) {
+            this.setState('error', 'Không đọc được tiêu đề từ form');
+            return;
+        }
+        if (scope === 'description' && !ctx.description?.trim()) {
+            this.setState('error', 'Không đọc được mô tả từ form');
+            return;
+        }
+        const busyLabels = {
+            title: 'Đang viết lại tiêu đề…',
+            description: 'Đang viết lại mô tả…',
+            both: 'Đang viết lại tiêu đề + mô tả…',
+        };
+        const doneLabels = {
+            title: 'Đã viết lại tiêu đề và áp dụng vào form',
+            description: 'Đã viết lại mô tả và áp dụng vào form',
+            both: 'Đã viết lại và áp dụng vào form',
+        };
         const generation = ++this.rewriteGeneration;
-        this.setState('busy', 'Đang gửi Gemini…', { waitingGemini: true });
+        this.setState('busy', busyLabels[scope] ?? busyLabels.both, {
+            waitingGemini: true,
+        });
         try {
             const settings = this.settings ?? (await getSettings());
             const result = await sendMessage({
@@ -125,6 +163,7 @@ export class FloatingPanel {
                     description: ctx.description,
                     shopName: ctx.shopName,
                     language: settings.language,
+                    scope,
                 },
             });
             if (generation !== this.rewriteGeneration)
@@ -138,7 +177,7 @@ export class FloatingPanel {
             this.descPreviewEl.textContent = data.description || '—';
             const ok = this.adapter.apply(data);
             this.setState(ok ? 'done' : 'error', ok
-                ? 'Đã viết lại và áp dụng vào form'
+                ? (doneLabels[scope] ?? doneLabels.both)
                 : 'Có JSON nhưng không điền được form — kiểm tra trang');
         }
         catch (err) {
@@ -227,7 +266,7 @@ const PANEL_STYLES = `
     font-size: 13px;
   }
   .panel {
-    width: 340px;
+    width: 360px;
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0,0,0,.18);
@@ -289,6 +328,18 @@ const PANEL_STYLES = `
   }
   .preview-box.desc { max-height: 100px; }
   .actions { display: flex; flex-direction: column; gap: 8px; }
+  .rewrite-row {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+  }
+  .btn.compact {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 11px;
+    line-height: 1.2;
+  }
   .btn {
     padding: 8px 12px;
     border-radius: 8px;

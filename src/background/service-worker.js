@@ -3,7 +3,7 @@ import { ensureTabReady, sendTabMessageReady } from './tab-messenger.js';
 import { withServiceWorkerKeepalive } from './keepalive.js';
 import { MessageType, replyAsync, safeSendResponse, sendTabMessage, } from '../shared/messaging.js';
 import { sanitizeRewrittenProduct } from '../shared/shop-names.js';
-import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../shared/storage.js';
+import { fillPromptTemplate, getSettings, mergeRewriteByScope, parseGeminiProductJson, } from '../shared/storage.js';
 const GEMINI_URL = 'https://gemini.google.com/app';
 function createRequestId() {
     return `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -30,6 +30,20 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
         chrome.tabs.onUpdated.addListener(listener);
     });
 }
+async function sendGeminiFillPrompt(prompt) {
+    const geminiTabId = await openGeminiTabIfNeeded();
+    await ensureTabReady(geminiTabId, 'gemini');
+    const response = await sendTabMessageReady(geminiTabId, 'gemini', {
+        type: MessageType.GEMINI_FILL_PROMPT,
+        payload: { prompt },
+    });
+    if (response?.error)
+        throw new Error(response.error);
+    if (!response?.ok)
+        throw new Error('Không điền được prompt vào Gemini');
+    return { ok: true };
+}
+
 async function openGeminiTabIfNeeded() {
     const tabs = await chrome.tabs.query({ url: 'https://gemini.google.com/*' });
     if (tabs[0]?.id != null) {
@@ -65,7 +79,14 @@ async function applyToSellerTab(tabId, data) {
 }
 async function handleRewriteProduct(payload, senderTabId) {
     const requestId = payload.requestId ?? createRequestId();
-    if (!payload.title?.trim() && !payload.description?.trim()) {
+    const scope = payload.scope ?? 'both';
+    if (scope === 'title' && !payload.title?.trim()) {
+        return { requestId, ok: false, error: 'Thiếu tiêu đề sản phẩm' };
+    }
+    if (scope === 'description' && !payload.description?.trim()) {
+        return { requestId, ok: false, error: 'Thiếu mô tả sản phẩm' };
+    }
+    if (scope === 'both' && !payload.title?.trim() && !payload.description?.trim()) {
         return {
             requestId,
             ok: false,
@@ -78,7 +99,7 @@ async function handleRewriteProduct(payload, senderTabId) {
         description: payload.description,
         shopName: payload.shopName ?? '',
         language: payload.language ?? settings.language,
-    });
+    }, { scope });
     try {
         const geminiTabId = await openGeminiTabIfNeeded();
         await ensureTabReady(geminiTabId, 'gemini');
@@ -104,7 +125,11 @@ async function handleRewriteProduct(payload, senderTabId) {
                 error: 'Gemini không trả về JSON {title, description} hợp lệ',
             };
         }
-        const data = sanitizeRewrittenProduct(parsed, payload.shopName ?? '');
+        const merged = mergeRewriteByScope(parsed, {
+            title: payload.title,
+            description: payload.description,
+        }, scope);
+        const data = sanitizeRewrittenProduct(merged, payload.shopName ?? '');
         if (senderTabId != null) {
             try {
                 await applyToSellerTab(senderTabId, data);
@@ -138,6 +163,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await openGeminiTabIfNeeded();
             return { ok: true };
         });
+    }
+    if (message.type === MessageType.GEMINI_FILL_PROMPT) {
+        const prompt = message.payload?.prompt?.trim();
+        if (!prompt) {
+            safeSendResponse(sendResponse, { ok: false, error: 'Thiếu prompt' });
+            return false;
+        }
+        return replyAsync(sendResponse, () => sendGeminiFillPrompt(prompt));
     }
     if (message.type === MessageType.GEMINI_CANCEL) {
         rewriteEpoch += 1;

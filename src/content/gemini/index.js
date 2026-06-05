@@ -1,5 +1,5 @@
 import { MessageType, replyAsync, safeSendResponse } from '../../shared/messaging.js';
-import { runGeminiPrompt } from './automation.js';
+import { fillGeminiComposer, runGeminiPrompt } from './automation.js';
 import { cancelActiveGeminiWait } from './response-tracker.js';
 const GEMINI_SCRIPT_FLAG = '__bigsellerAiGeminiScript';
 if (!globalThis[GEMINI_SCRIPT_FLAG]) {
@@ -13,6 +13,17 @@ if (!globalThis[GEMINI_SCRIPT_FLAG]) {
             cancelActiveGeminiWait();
             safeSendResponse(sendResponse, { ok: true });
             return false;
+        }
+        if (message?.type === MessageType.GEMINI_FILL_PROMPT) {
+            const prompt = message.payload?.prompt?.trim();
+            if (!prompt) {
+                safeSendResponse(sendResponse, { ok: false, error: 'Thiếu prompt' });
+                return false;
+            }
+            return replyAsync(sendResponse, async () => {
+                await fillGeminiComposer(prompt);
+                return { ok: true };
+            });
         }
         if (message?.type !== MessageType.GEMINI_SEND_PROMPT)
             return false;

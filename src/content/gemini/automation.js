@@ -11,7 +11,7 @@ function clickSend() {
     btn.click();
     return true;
 }
-function fillGeminiInput(editor, prompt) {
+export function fillGeminiInput(editor, prompt) {
     const quillRoot = editor.closest('rich-textarea, .rich-textarea, .text-input-field_textarea') ??
         editor.parentElement ??
         editor;
@@ -28,6 +28,15 @@ function fillGeminiInput(editor, prompt) {
     }
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 }
+/** Chỉ điền prompt vào ô chat — không gửi, không chờ phản hồi */
+export async function fillGeminiComposer(prompt) {
+    const editor = await waitForElement(GEMINI_INPUT_SELECTORS, 30000);
+    if (!editor)
+        throw new Error('Không tìm thấy ô nhập Gemini');
+    fillGeminiInput(editor, prompt);
+    editor.focus();
+}
+
 export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDescription) {
     try {
         geminiDebugLog('run', `requestId=${requestId} — bắt đầu runGeminiPrompt`);

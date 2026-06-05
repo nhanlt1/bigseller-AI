@@ -226,13 +226,31 @@ function readAntSelectParts(container) {
     return parts;
 }
 
-/** Đọc danh mục trên form sản phẩm Shopee Seller Center */
+const BREADCRUMB_SKIP = /^(shopee|trang chủ|home|mall)$/i;
+
+function readShopeeBreadcrumbCategoryPath(root) {
+    const breadcrumb =
+        root.querySelector('.page-product__breadcrumb') ??
+        root.querySelector('nav[aria-label="breadcrumb"]') ??
+        root.querySelector('[class*="breadcrumb"]');
+    if (!breadcrumb)
+        return '';
+    const parts = [...breadcrumb.querySelectorAll('a, span, .breadcrumb__link')]
+        .map((n) => n.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+        .filter((t) => t && !BREADCRUMB_SKIP.test(t));
+    const deduped = parts.filter((t, i) => i === 0 || t !== parts[i - 1]);
+    return deduped.length >= 2 ? deduped.join(' > ') : '';
+}
+
+/** Đọc danh mục Shopee Seller Center hoặc breadcrumb trang SP buyer */
 export function readShopeeProductCategoryPath(root = document) {
     const el =
         root.querySelector('.product-category-text') ??
         root.querySelector('.product-category-box-inner');
     const text = el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-    return text.includes('>') ? text : '';
+    if (text.includes('>'))
+        return text;
+    return readShopeeBreadcrumbCategoryPath(root);
 }
 
 /**

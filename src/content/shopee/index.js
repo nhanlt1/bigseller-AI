@@ -6,9 +6,23 @@ import { mountPricingFab } from '../shared/pricing-popup.js';
 import { observeDomChanges } from '../shared/dom-utils.js';
 import { isShopeeOrderDetailUrl, mountOrderDetailCheck } from './order-detail-check.js';
 import { mountProductCategoryFeeBadge, updateProductCategoryFeeBadge, } from '../shared/product-category-fee.js';
-import { isShopeePricingHost, isShopeeSellerCenterHost } from './shopee-host.js';
+import {
+    mountSimilarProductsResearch,
+    scheduleAutoCollect,
+} from './similar-products-research.js';
+import {
+    isShopeePricingHost,
+    isShopeeProductResearchUrl,
+    isShopeeSellerCenterHost,
+} from './shopee-host.js';
 
 listenForProductApply(shopeeAdapter);
+
+function initSimilarProductsResearch() {
+    if (!isShopeeProductResearchUrl())
+        return;
+    mountSimilarProductsResearch();
+}
 
 function ensurePricingFab() {
     if (!document.getElementById('bigseller-ai-pricing-fab'))
@@ -39,6 +53,7 @@ function init() {
     if (!isShopeePricingHost())
         return;
     ensurePricingFab();
+    initSimilarProductsResearch();
     if (isShopeeSellerCenterHost())
         initSellerCenterExtras();
 }
@@ -52,6 +67,9 @@ observeDomChanges(() => {
     if (!isShopeePricingHost())
         return;
     ensurePricingFab();
+    initSimilarProductsResearch();
+    if (isShopeeProductResearchUrl())
+        scheduleAutoCollect();
     if (!isShopeeSellerCenterHost())
         return;
     mountOrderDetailCheck();

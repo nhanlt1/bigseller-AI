@@ -2,7 +2,6 @@ import {
     formatCommissionPercent,
     lookupCategoryCommission,
     readProductCategoryPath,
-    readShopeeProductCategoryPath,
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
 import { formatPriceInputValue, parsePriceInput } from '../../pricing/price-input.js';
@@ -231,11 +230,10 @@ export class PricingPopup {
     `;
     }
     categoryCommissionHintHtml() {
+        const path = readProductCategoryPath();
         const lookup =
             this.categoryLookup ??
-            (readShopeeProductCategoryPath()
-                ? lookupCategoryCommission(readShopeeProductCategoryPath())
-                : null);
+            (path ? lookupCategoryCommission(path) : null);
         if (!lookup?.raw)
             return '';
         const pct = formatCommissionPercent(lookup.rate);
