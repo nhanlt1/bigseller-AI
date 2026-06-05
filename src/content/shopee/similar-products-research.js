@@ -417,7 +417,6 @@ class SimilarResearchPanel {
     host;
     shadow;
     visible = false;
-    compact = false;
     sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
     /** @type {Record<string, ReturnType<import('./similar-products-title-position.js')['resolveMyProductDisplayPosition']>>} */
     lastPositions = {};
@@ -452,19 +451,6 @@ class SimilarResearchPanel {
         updateFabPosition();
     }
 
-    setCompact(compact) {
-        this.compact = compact;
-        if (compact)
-            this.host.setAttribute('data-compact', '1');
-        else
-            this.host.removeAttribute('data-compact');
-        const panelEl = this.shadow.querySelector('.panel');
-        panelEl?.classList.toggle('compact', compact);
-        const expandBtn = this.shadow.getElementById('expand-btn');
-        if (expandBtn)
-            expandBtn.hidden = !compact;
-    }
-
     open() {
         if (this.visible)
             return;
@@ -488,7 +474,6 @@ class SimilarResearchPanel {
         this.persistMyProductTitleFromInput();
         this.visible = false;
         this.host.setAttribute('data-open', '0');
-        this.setCompact(false);
         if (dismiss) {
             try {
                 sessionStorage.setItem(SIDEBAR_DISMISSED_KEY, '1');
@@ -619,10 +604,22 @@ class SimilarResearchPanel {
         }
         const result = focusProductCardForRow(position.matchedRow, position);
         if (result.ok) {
-            this.setCompact(true);
-            this.setStatus(
-                `Đã highlight SP #${position.rank} — bấm ⤢ để mở lại bảng.`,
-            );
+            this.setStatus(`Đã highlight SP #${position.rank} trên trang.`);
+        }
+        else {
+            this.setStatus(result.message);
+        }
+    }
+
+    async onTableSiblingTitleClick(rowIndex) {
+        const row = this.rows[rowIndex];
+        if (!row || !isSiblingShopId(row.shopId)) {
+            this.setStatus('Chỉ bấm được tên SP thuộc shop cùng hệ.');
+            return;
+        }
+        const result = focusProductCardForRow(row);
+        if (result.ok) {
+            this.setStatus(`Đã highlight SP #${row.rank ?? '?'} trên trang.`);
         }
         else {
             this.setStatus(result.message);
@@ -644,7 +641,6 @@ class SimilarResearchPanel {
         <header class="header">
           <span class="title">Nghiên cứu SP tương tự</span>
           <div class="header-actions">
-            <button type="button" class="btn-expand" id="expand-btn" hidden title="Mở lại bảng sau highlight">⤢</button>
             <button type="button" class="btn-close" id="close-btn" title="Đóng">×</button>
           </div>
         </header>
@@ -719,10 +715,6 @@ class SimilarResearchPanel {
                 void this.onPositionHintClick(i);
             });
         }
-        this.shadow.getElementById('expand-btn')?.addEventListener('click', () => {
-            this.setCompact(false);
-            this.setStatus('Đã mở rộng bảng nghiên cứu.');
-        });
         this.shadow.getElementById('close-btn')?.addEventListener('click', () => {
             this.close(true);
         });
@@ -734,6 +726,15 @@ class SimilarResearchPanel {
         });
         this.shadow.getElementById('title-research-btn')?.addEventListener('click', () => {
             void this.copyTitleResearchPrompt();
+        });
+        this.shadow.getElementById('table-wrap')?.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.title-nav-btn');
+            if (!btn)
+                return;
+            ev.preventDefault();
+            const idx = Number.parseInt(btn.dataset.rowIndex ?? '', 10);
+            if (Number.isFinite(idx))
+                void this.onTableSiblingTitleClick(idx);
         });
         installTableScrollContainment(
             this.shadow.getElementById('table-scroll'),
@@ -838,11 +839,12 @@ class SimilarResearchPanel {
                 `<th class="${c.colClass ?? ''}">${escapeHtml(c.label)}</th>`,
         ).join('');
         const body = this.rows
-            .map((row) => {
+            .map((row, rowIndex) => {
                 const rowClasses = [];
                 if (row.kind === 'Chính')
                     rowClasses.push('row-main');
-                if (isSiblingShopId(row.shopId))
+                const siblingRow = isSiblingShopId(row.shopId);
+                if (siblingRow)
                     rowClasses.push('row-sibling-shop');
                 const classAttr = rowClasses.length
                     ? ` class="${rowClasses.join(' ')}"`
@@ -850,9 +852,16 @@ class SimilarResearchPanel {
                 const cells = RESEARCH_TABLE_COLUMNS.map((c) => {
                     const v = row[c.key];
                     const cls = c.colClass ?? '';
-                    const text = c.key === 'productUrl' && v
-                        ? `<a href="${escapeAttr(v)}" target="_blank" rel="noopener">Mở</a>`
-                        : escapeHtml(v);
+                    let text;
+                    if (c.key === 'productUrl' && v) {
+                        text = `<a href="${escapeAttr(v)}" target="_blank" rel="noopener">Mở</a>`;
+                    }
+                    else if (c.key === 'title' && siblingRow && v) {
+                        text = `<button type="button" class="title-nav-btn" data-row-index="${rowIndex}" title="Bấm để cuộn tới SP trên trang Shopee">${escapeHtml(v)}</button>`;
+                    }
+                    else {
+                        text = escapeHtml(v);
+                    }
                     return `<td class="${cls}">${text}</td>`;
                 }).join('');
                 return `<tr${classAttr}>${cells}</tr>`;
@@ -1035,15 +1044,6 @@ const PANEL_STYLES = `
     border-left: 1px solid #e5e7eb;
     overflow: hidden;
   }
-  .panel.compact .toolbar,
-  .panel.compact .my-title-bars,
-  .panel.compact .status,
-  .panel.compact .body {
-    display: none;
-  }
-  :host([data-compact="1"]) .resize-handle {
-    display: none;
-  }
   .header {
     display: flex;
     align-items: center;
@@ -1059,17 +1059,6 @@ const PANEL_STYLES = `
     gap: 4px;
   }
   .title { font-weight: 700; font-size: 13px; }
-  .btn-expand {
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    color: #fff;
-    font-size: 14px;
-    cursor: pointer;
-    line-height: 1;
-    border-radius: 6px;
-    padding: 4px 6px;
-  }
-  .btn-expand:hover { background: rgba(255, 255, 255, 0.32); }
   .btn-close {
     background: transparent;
     border: none;
@@ -1269,6 +1258,30 @@ const PANEL_STYLES = `
   }
   .data-table tr.row-sibling-shop.row-main td {
     background: #dbeafe;
+  }
+  .title-nav-btn {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    color: #047857;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    line-height: inherit;
+  }
+  .title-nav-btn:hover {
+    color: #065f46;
+    text-decoration-style: solid;
+  }
+  .title-nav-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    border-radius: 2px;
   }
   .data-table a { color: #2563eb; }
   .empty {
