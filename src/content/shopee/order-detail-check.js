@@ -8,8 +8,10 @@ import {
   parseVndText,
   resolveIncomeRowRole,
   resolveRowRole,
+  isSettlementRowFromDom,
   rowCheckTitle,
 } from "../../pricing/order-settlement.js";
+import { copyTextToClipboard } from "../../shared/clipboard.js";
 import { getSettings } from "../../shared/storage.js";
 import { observeDomChanges } from "../shared/dom-utils.js";
 
@@ -20,6 +22,15 @@ let positionListenersBound = false;
 let positionRaf = 0;
 /** @type {{ valueEl: HTMLElement, cellEl: HTMLElement }[]} */
 let floatRowRefs = [];
+let lastIncomeSnapshot = "";
+
+function incomeContainerSelector() {
+  return ".order-detail .payment-info-detail .income-container, .order-detail .income-container";
+}
+
+function snapshotIncomeRows(rows) {
+  return JSON.stringify(rows.map((r) => [r.label, r.value]));
+}
 
 export function isShopeeOrderDetailUrl(url = location.href) {
   return /banhang\.shopee\.(vn|com)\/portal\/sale\/order\/\d+/i.test(url);
@@ -39,17 +50,48 @@ function ensureStyles() {
       }
       .bigseller-ai-check-float-header {
         position: fixed;
-        width: 152px;
+        z-index: 2147483641;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        width: auto;
+        max-width: 200px;
         text-align: right;
         font-size: 11px;
         font-weight: 700;
         color: #ee4d2d;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        pointer-events: none;
-        padding: 2px 6px;
+        pointer-events: auto;
+        padding: 6px 8px;
         background: rgba(255,255,255,.94);
         border-radius: 6px 6px 0 0;
         box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      }
+      .bigseller-ai-check-float-header-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #ee4d2d;
+      }
+      .bigseller-ai-copy-reconcile {
+        padding: 5px 10px;
+        border: 1px solid #fed7aa;
+        border-radius: 6px;
+        background: #fff7ed;
+        color: #9a3412;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .bigseller-ai-copy-reconcile:hover {
+        background: #ffedd5;
+      }
+      .bigseller-ai-copy-reconcile:disabled {
+        opacity: 0.6;
+        cursor: wait;
       }
       .bigseller-ai-check-float-banner {
         position: fixed;
@@ -163,6 +205,66 @@ function bindPositionListeners() {
   window.addEventListener("resize", schedule);
 }
 
+function extensionCheckDisplay(row, role, calc) {
+  const expected = expectedValueForRow(role, calc);
+  const fromDom = isSettlementRowFromDom(role, calc);
+  if (expected == null)
+    return "—";
+  if (fromDom)
+    return "đơn ✓";
+  const match = amountsMatch(row.value, expected);
+  return `${formatVnd(expected)}${match ? " ✓" : ""}`;
+}
+
+function copyAmount(value) {
+  return formatVnd(value).replace(/\u00a0/g, " ");
+}
+
+/** Tab-separated — dán Excel/Sheets: nhãn | Shopee | Extension */
+function buildReconciliationCopyText(rows, calc) {
+  const finalRow =
+    rows.find((r) => resolveRowRole(r) === "sellerIncome") ??
+    rows.find((r) => r.item.classList.contains("highlighted")) ??
+    rows[rows.length - 1];
+  const lines = ["Nhãn\tShopee\tExtension (kiểm tra)"];
+  for (const row of rows) {
+    const role = resolveRowRole(row);
+    lines.push(
+      `${row.label}\t${copyAmount(row.value)}\t${extensionCheckDisplay(row, role, calc).replace(/\u00a0/g, " ")}`,
+    );
+  }
+  lines.push("");
+  lines.push(
+    `Tổng kết\tShopee ${copyAmount(finalRow.value)}\tExtension ${copyAmount(calc.sellerIncome)}${amountsMatch(finalRow.value, calc.sellerIncome) ? " ✓" : ""}`,
+  );
+  return lines.join("\n");
+}
+
+async function copyReconciliationToClipboard(btn) {
+  const container = document.querySelector(incomeContainerSelector());
+  if (!container) {
+    btn.textContent = "Không thấy bảng";
+    return;
+  }
+  const rows = readIncomeRows(container);
+  if (rows.length === 0) {
+    btn.textContent = "Không có dòng";
+    return;
+  }
+  const settings = await getSettings();
+  const parsed = buildSettlementFromRows(rows);
+  const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
+  const text = buildReconciliationCopyText(rows, calc);
+  btn.disabled = true;
+  const prev = btn.textContent;
+  const ok = await copyTextToClipboard(text);
+  btn.textContent = ok ? "Đã copy!" : "Copy lỗi";
+  btn.disabled = false;
+  setTimeout(() => {
+    btn.textContent = prev;
+  }, 1600);
+}
+
 function positionFloatOverlay() {
   const float = document.getElementById(FLOAT_ID);
   if (!float) return;
@@ -176,8 +278,10 @@ function positionFloatOverlay() {
   const firstRect = anchor.getBoundingClientRect();
   const gap = 8;
   if (header) {
-    header.style.top = `${Math.max(8, firstRect.top - 26)}px`;
     header.style.left = `${firstRect.right + gap}px`;
+    const headerH = header.getBoundingClientRect().height || 32;
+    const headerGap = 4;
+    header.style.top = `${Math.max(8, firstRect.top - headerH - headerGap)}px`;
   }
   if (banner && header) {
     const headerRect = header.getBoundingClientRect();
@@ -194,9 +298,8 @@ function positionFloatOverlay() {
   }
 }
 
-function renderCheckColumn(container, settings) {
+function renderCheckColumn(container, settings, rows) {
   removeFloatOverlay();
-  const rows = readIncomeRows(container);
   if (rows.length === 0) return;
   const parsed = buildSettlementFromRows(rows);
   const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
@@ -206,7 +309,26 @@ function renderCheckColumn(container, settings) {
   float.id = FLOAT_ID;
   const header = document.createElement("div");
   header.className = "bigseller-ai-check-float-header";
-  header.textContent = "Kiểm tra ($)";
+  const headerTitle = document.createElement("span");
+  headerTitle.className = "bigseller-ai-check-float-header-title";
+  headerTitle.textContent = "Kiểm tra ($)";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "bigseller-ai-copy-reconcile";
+  copyBtn.textContent = "Copy 3 cột";
+  copyBtn.title =
+    "Copy nhãn + số Shopee + số extension (tab-separated, dán Excel)";
+  copyBtn.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  copyBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void copyReconciliationToClipboard(copyBtn);
+  });
+  header.appendChild(headerTitle);
+  header.appendChild(copyBtn);
   float.appendChild(header);
   const finalRow =
     rows.find((r) => resolveRowRole(r) === "sellerIncome") ??
@@ -225,13 +347,11 @@ function renderCheckColumn(container, settings) {
     const expected = expectedValueForRow(role, calc);
     const cell = document.createElement("div");
     cell.className = "bigseller-ai-check-float-cell";
-    const fromDom =
-      (role === "commission" && calc.usedDomCommission) ||
-      (role === "payment" && calc.usedDomPayment) ||
-      (role === "piShip" && calc.usedDomPiShip);
+    const fromDom = isSettlementRowFromDom(role, calc);
+    const display = extensionCheckDisplay(row, role, calc);
     if (expected == null) {
       cell.classList.add("na");
-      cell.textContent = "—";
+      cell.textContent = display;
       const hint = rowCheckTitle(role, calc);
       cell.title =
         role === "shippingDetail"
@@ -239,12 +359,12 @@ function renderCheckColumn(container, settings) {
           : hint || "Extension không tính dòng này";
     } else if (fromDom) {
       cell.classList.add("match");
-      cell.textContent = "đơn ✓";
+      cell.textContent = display;
       cell.title = rowCheckTitle(role, calc) || "Dùng số trên đơn để tính thu nhập";
     } else {
       const match = amountsMatch(row.value, expected);
       cell.classList.add(match ? "match" : "mismatch");
-      cell.textContent = `${formatVnd(expected)}${match ? " ✓" : ""}`;
+      cell.textContent = display;
       const hint = rowCheckTitle(role, calc);
       cell.title = match
         ? hint || "Khớp công thức extension"
@@ -260,17 +380,29 @@ function renderCheckColumn(container, settings) {
 async function refreshOrderCheck() {
   if (!isShopeeOrderDetailUrl()) {
     removeFloatOverlay();
+    lastIncomeSnapshot = "";
     return;
   }
-  const container = document.querySelector(
-    ".order-detail .payment-info-detail .income-container, .order-detail .income-container",
-  );
+  const container = document.querySelector(incomeContainerSelector());
   if (!container) {
     removeFloatOverlay();
+    lastIncomeSnapshot = "";
     return;
   }
+  const rows = readIncomeRows(container);
+  if (rows.length === 0) {
+    removeFloatOverlay();
+    lastIncomeSnapshot = "";
+    return;
+  }
+  const snapshot = snapshotIncomeRows(rows);
+  if (snapshot === lastIncomeSnapshot && document.getElementById(FLOAT_ID)) {
+    positionFloatOverlay();
+    return;
+  }
+  lastIncomeSnapshot = snapshot;
   const settings = await getSettings();
-  renderCheckColumn(container, settings);
+  renderCheckColumn(container, settings, rows);
 }
 
 export function mountOrderDetailCheck() {

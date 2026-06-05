@@ -1,4 +1,9 @@
-import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from './order-profit.js';
+import {
+    buildPricingOrderInput,
+    evaluateOrderProfit,
+    resolvePricingTarget,
+    solveMinUnitPriceByTarget,
+} from './order-profit.js';
 const MAX_TIERS = 5;
 export function normalizeTiers(tiers) {
     return tiers
@@ -11,32 +16,22 @@ export function evaluateTiers(tiers, costPerUnit, calc, feeConfig, orderOpts = {
         const computed = target
             ? solveMinUnitPriceByTarget(tier.qtyMin, costPerUnit, target, feeConfig, orderOpts) ?? 0
             : 0;
-        const profitAtMin = computed > 0
-            ? evaluateOrderProfit({
-                quantity: tier.qtyMin,
+        const profitInput = (qty) =>
+            buildPricingOrderInput({
+                quantity: qty,
                 unitPrice: computed,
                 costPerUnit,
                 feeConfig,
-                ...orderOpts,
-            }).profitPerUnit
+                pricingCalculator: calc,
+            });
+        const profitAtMin = computed > 0
+            ? evaluateOrderProfit(profitInput(tier.qtyMin)).profitPerUnit
             : 0;
         const profitAtMax = computed > 0
-            ? evaluateOrderProfit({
-                quantity: tier.qtyMax,
-                unitPrice: computed,
-                costPerUnit,
-                feeConfig,
-                ...orderOpts,
-            }).profitPerUnit
+            ? evaluateOrderProfit(profitInput(tier.qtyMax)).profitPerUnit
             : 0;
         const incomeAtMin = computed > 0
-            ? evaluateOrderProfit({
-                quantity: tier.qtyMin,
-                unitPrice: computed,
-                costPerUnit,
-                feeConfig,
-                ...orderOpts,
-            }).sellerIncome / tier.qtyMin
+            ? evaluateOrderProfit(profitInput(tier.qtyMin)).sellerIncome / tier.qtyMin
             : 0;
         const meetsTarget = computed > 0 &&
             (target?.kind === 'netReceive'

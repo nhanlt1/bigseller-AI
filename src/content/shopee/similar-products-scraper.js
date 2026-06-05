@@ -308,15 +308,58 @@ export function scrapeSimilarProducts(root = document, page = 1) {
   return results;
 }
 
+function parsePageButtonText(el) {
+  const text = String(el?.textContent ?? "").trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = Number.parseInt(text, 10);
+  return n >= 1 ? n : null;
+}
+
+function isActivePageControl(el) {
+  if (!el || parsePageButtonText(el) == null) return false;
+  if (el.getAttribute("aria-current") === "page") return true;
+  const cls = String(el.className ?? "");
+  if (/page--active|__page--active/.test(cls)) return true;
+  if (/\bactive\b/.test(cls) && !/\binactive\b/.test(cls)) return true;
+  if (el.matches?.("button.shopee-button-solid, .shopee-button-solid"))
+    return true;
+  return false;
+}
+
+/** Trang hiện tại — ưu tiên nút phân trang Shopee (SPA thường không đổi ?page=). */
+export function detectShopeeCurrentPage(doc = document) {
+  const controllers = doc.querySelectorAll(
+    '.shopee-page-controller, .shopee-mini-page-controller, [class*="page-controller"]',
+  );
+  for (const root of controllers) {
+    const marked = root.querySelector(
+      '.shopee-page-controller__page--active, [class*="__page--active"], [aria-current="page"]',
+    );
+    const fromMarked = parsePageButtonText(marked);
+    if (fromMarked) return fromMarked;
+
+    for (const el of root.querySelectorAll(
+      "button, a, .shopee-page-controller__page, [class*='page-controller__page']",
+    )) {
+      if (!isActivePageControl(el)) continue;
+      const n = parsePageButtonText(el);
+      if (n) return n;
+    }
+  }
+
+  const fromUrl = Number.parseInt(
+    new URLSearchParams(location.search).get("page") ?? "",
+    10,
+  );
+  if (fromUrl >= 1) return fromUrl;
+  return 1;
+}
+
 /**
  * @param {Document} [root]
  */
 export function scrapeCurrentPage(root = document) {
-  const page =
-    Number.parseInt(
-      new URLSearchParams(location.search).get("page") ?? "1",
-      10,
-    ) || 1;
+  const page = detectShopeeCurrentPage(root);
   const main = scrapeMainProduct(root, page);
   const similar = scrapeSimilarProducts(root, page);
   return { page, main, similar };

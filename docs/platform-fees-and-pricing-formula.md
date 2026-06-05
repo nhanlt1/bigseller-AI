@@ -40,14 +40,14 @@ Cập nhật tham chiếu: 06/2026. Tra [Học viện Shopee](https://banhang.sh
 **Voucher Xtra** (từ 23/05/2026): **5,5% giá trị mỗi sản phẩm**, tối đa **50.000đ/SP** — tính trên đơn giao thành công ([TukiGroup](https://tukigroup.vn/quan-trong-cap-nhat-ve-phi-danh-cho-nguoi-ban-thuoc-shopee-mall-tu-ngay-29-05-2026/), [Effitrack](https://effitrack.me/phi-san-shopee-2026-cap-nhat-moi-nhat-anh-huong/)).
 
 ```text
-Phụ phí = phí cố định%×tiền hàng + (3.000đ + Voucher Xtra) + phí GD%×(tiền hàng + phí ship khách)
+Phụ phí = phí cố định + Phí DV (3.000 + VX) + phí GD + PiShip (DOM) + Tiếp thị liên kết (DOM) + NTTD 1%×tiền hàng (chỉ khi đơn có dòng NTTD)
 Thuế = 1% GTGT×tiền hàng + 0,5% TNCN×tiền hàng
 Thu nhập = tiền hàng + seller chịu ship − Phụ phí − Thuế
 ```
 
 Chi tiết ship/voucher trong `income-group[1]` **không** cộng vào thu nhập.
 
-**Trang đối soát đơn:** map theo nhãn `.income-label-text` (không theo chỉ số cố định). Lấy từ DOM: **Phí cố định**, **PiShip** (nếu có, thường 2.700đ), **Phí xử lý GD**. Tính extension: **Phí Dịch Vụ** (3.000 + Voucher Xtra) + thuế. Cột Kiểm tra ($) căn từng dòng DOM — dòng ship chi tiết hiển thị «—».
+**Trang đối soát đơn:** map theo nhãn `.income-label-text`. Thứ tự Phụ phí (2026+): **Phí cố định** → **Phí Dịch Vụ** → **Phí xử lý GD** → **Hoa hồng Tiếp thị liên kết** (DOM, seller cài) → **Phí NTTD** (chỉ khi cột Shopee có dòng: lấy số đơn hoặc 1%×tiền hàng). Tính extension: Phí Dịch Vụ (3.000 + VX) + thuế. Cột Kiểm tra ($) căn từng dòng.
 
 ### Đơn mẫu (đã kiểm chứng)
 
@@ -72,7 +72,7 @@ Thu nhập(p×q) = q×(vốn + lời/sp)
 Thu nhập = p×q + sellerShip − Phụ phí − Thuế
 ```
 
-`Phụ phí` = phí cố định%×tiền hàng + (3.000 + Voucher Xtra) + phí GD%×(tiền hàng + phí ship khách).  
+`Phụ phí` = phí cố định%×tiền hàng + (3.000 + VX) + phí GD%×(tiền hàng + ship khách) + NTTD 1%×tiền hàng (popup $ luôn cộng; đối soát đơn chỉ khi có dòng Shopee).  
 `Thuế` = GTGT%×tiền hàng + TNCN%×tiền hàng.
 
 Popup **$**: nhập **lợi nhuận/sp** hoặc (nếu để trống lợi nhuận) **giá muốn nhận về/sp** — thu nhập sau phí sàn, chưa trừ vốn. Ship do sàn tự chọn, không nhập. % phí lấy từ danh mục SP khi có.

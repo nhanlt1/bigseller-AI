@@ -1,6 +1,7 @@
 import { waitForElement } from '../shared/dom-utils.js';
 import {
     buildTableRows,
+    detectShopeeCurrentPage,
     scrapeCurrentPage,
 } from './similar-products-scraper.js';
 
@@ -22,12 +23,7 @@ function buildPageUrl(page) {
 }
 
 function getCurrentPage() {
-    return (
-        Number.parseInt(
-            new URLSearchParams(location.search).get('page') ?? '1',
-            10,
-        ) || 1
-    );
+    return detectShopeeCurrentPage();
 }
 
 function sleep(ms, signal) {

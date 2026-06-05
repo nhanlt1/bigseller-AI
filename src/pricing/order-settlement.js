@@ -24,14 +24,17 @@ function normalizeLabel(label) {
  * DOM chi tiết thanh toán đơn (2026) — ưu tiên nhãn `.income-label-text`:
  * strong[0] Tổng tiền SP · group[0] Giá SP · strong[1] Tổng ship ước tính
  * group[1] chi tiết ship · strong[2] Phụ phí
- * group[2]: Phí cố định · PiShip (tuỳ đơn) · Phí Dịch Vụ · Phí xử lý GD
+ * group[2]: Phí cố định · Phí Dịch Vụ · Phí xử lý GD · Hoa hồng Tiếp thị liên kết (DOM) · NTTD 1%
  * strong[3] Thuế · group[3] GTGT/TNCN · strong[4] phụ DV người mua · highlighted Doanh thu
  */
 export function classifyIncomeRow(label) {
   const l = normalizeLabel(label);
+  if (/nttd|hien thi nttd/.test(l)) return "nttdDisplayFee";
   if (/doanh thu/.test(l)) return "sellerIncome";
   if (/piship|pi\s*ship/.test(l)) return "piShip";
-  if (/phi co dinh|hoa hong/.test(l)) return "commission";
+  if (/tiep thi lien ket|hoa hong.*tiep thi|affiliate/.test(l))
+    return "affiliateCommission";
+  if (/phi co dinh/.test(l)) return "commission";
   if (/phi dich vu/.test(l)) return "serviceBundle";
   if (/phi xu ly|xu ly.*giao dich/.test(l)) return "payment";
   if (/^phu phi$/.test(l) || /tong phu phi/.test(l)) return "platformFeesTotal";
@@ -43,7 +46,9 @@ export function classifyIncomeRow(label) {
   if (/tong phi van chuyen.*uoc tinh/.test(l)) return "shippingEstimateSubtotal";
   if (/phu dich vu.*gia tri|gia tri gia tang/.test(l)) return "buyerAddonSubtotal";
   if (/seller.*chiu|nguoi ban chiu/.test(l)) return "sellerShippingBurden";
-  if (/van chuyen|phi ship|voucher|tro gia/.test(l)) return "shippingDetail";
+  if (/tro gia/.test(l) || /ma giam gia.*(cua )?shop/.test(l))
+    return "shopProductDiscount";
+  if (/van chuyen|phi ship|voucher/.test(l)) return "shippingDetail";
   return "other";
 }
 
@@ -77,37 +82,113 @@ export function resolveRowRole(row) {
   return classifyIncomeRow(row.label);
 }
 
+/** Bỏ SVG/CSS/tooltip Shopee khỏi nhãn (copy đối soát, phân loại dòng). */
+export function sanitizeIncomeLabel(raw) {
+  let s = String(raw ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/\.cls-\d+\{[^}]*\}/gi, "");
+  s = s.replace(/\{fill-rule:[^}]*\}/gi, "");
+  s = s.replace(/question/gi, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  const known = [
+    "Tổng tiền sản phẩm",
+    "Giá sản phẩm",
+    "Tổng phí vận chuyển ước tính",
+    "Phí vận chuyển Người mua trả",
+    "Phí vận chuyển ước tính",
+    "Trợ giá",
+    "Phụ phí",
+    "Phí cố định",
+    "Phí Dịch Vụ",
+    "Phí xử lý giao dịch",
+    "Phí hoa hồng Tiếp thị liên kết",
+    "Phí dịch vụ hiển thị NTTD",
+    "Tổng phụ dịch vụ giá trị gia tăng cho người mua",
+    "Doanh thu đơn hàng ước tính",
+  ];
+  for (const phrase of known) {
+    const idx = s.indexOf(phrase);
+    if (idx === -1) continue;
+    const fromPhrase = s.slice(idx);
+    if (fromPhrase.startsWith(phrase)) return phrase;
+  }
+  const voucher = s.match(/^(Mã giảm giá[^.]{0,80})/i);
+  if (voucher) return voucher[1].trim();
+  const beforeCls = s.split(/\.\s*cls-/i)[0]?.trim();
+  if (beforeCls && beforeCls.length < s.length) return beforeCls;
+  if (s.length > 72) return s.slice(0, 72).trim();
+  return s;
+}
+
+function labelTextWithoutIcons(el) {
+  const clone = el.cloneNode(true);
+  clone
+    .querySelectorAll("svg, style, script, [class*='icon']")
+    .forEach((n) => n.remove());
+  return clone.textContent ?? "";
+}
+
 export function extractIncomeLabel(item) {
   const textEl = item.querySelector(".income-label-text");
-  if (textEl?.textContent?.trim()) return textEl.textContent.trim();
+  if (textEl) {
+    const t = sanitizeIncomeLabel(labelTextWithoutIcons(textEl));
+    if (t) return t;
+  }
   const labelEl = item.querySelector(
     '.income-label, .income-name, [class*="label"]',
   );
   const valueEl = item.querySelector(".income-value");
-  const raw = (labelEl?.textContent ?? item.textContent ?? "").trim();
-  if (!valueEl) return raw;
-  return raw.replace(valueEl.textContent ?? "", "").trim();
+  const raw = (labelEl ? labelTextWithoutIcons(labelEl) : item.textContent ?? "").trim();
+  if (!valueEl) return sanitizeIncomeLabel(raw);
+  return sanitizeIncomeLabel(
+    raw.replace(valueEl.textContent ?? "", "").trim(),
+  );
+}
+
+/** Cộng trợ giá / mã shop — tránh đếm trùng cùng một số tiền hai dòng. */
+function accumulateShopProductDiscount(data, amount) {
+  if (!amount || amount >= 0) return;
+  const key = Math.abs(Math.round(amount));
+  if (!data._shopDiscountSeen) data._shopDiscountSeen = new Set();
+  if (data._shopDiscountSeen.has(key)) return;
+  data._shopDiscountSeen.add(key);
+  data.shopProductAdjustment += amount;
 }
 
 export function buildSettlementFromRows(rows) {
   const data = {
     productTotal: 0,
+    shopProductAdjustment: 0,
     sellerShippingBurden: 0,
     shippingBuyerForPayment: 0,
     quantity: 1,
     domCommission: null,
     domPayment: null,
     domPiShip: null,
+    domAffiliateCommission: null,
+    domNttdDisplay: null,
+    hasNttdRow: false,
+    hasTaxRows: false,
   };
   for (const row of rows) {
     const role = resolveRowRole(row);
     const v = row.value;
     if (role === "productTotal" && v > data.productTotal) data.productTotal = v;
+    if (role === "shopProductDiscount")
+      accumulateShopProductDiscount(data, v);
     if (role === "sellerShippingBurden") data.sellerShippingBurden = v;
     if (role === "commission" && v !== 0)
       data.domCommission = Math.abs(v);
     if (role === "payment" && v !== 0) data.domPayment = Math.abs(v);
     if (role === "piShip" && v !== 0) data.domPiShip = Math.abs(v);
+    if (role === "affiliateCommission" && v !== 0)
+      data.domAffiliateCommission = Math.abs(v);
+    if (role === "nttdDisplayFee") {
+      data.hasNttdRow = true;
+      if (v !== 0) data.domNttdDisplay = Math.abs(v);
+    }
+    if (role === "vatGtgt" || role === "pitTncn" || role === "taxTotal")
+      data.hasTaxRows = true;
     if (
       role === "shippingDetail" &&
       v > 0 &&
@@ -115,6 +196,7 @@ export function buildSettlementFromRows(rows) {
     )
       data.shippingBuyerForPayment = v;
   }
+  delete data._shopDiscountSeen;
   if (!data.productTotal) {
     const first = rows.find(
       (r) => resolveRowRole(r) === "productTotal" || r.value > 1000,
@@ -126,10 +208,12 @@ export function buildSettlementFromRows(rows) {
 
 /**
  * Thu nhập = tiền hàng + seller chịu ship − Phụ phí − Thuế.
- * Phụ phí = phí cố định (DOM) + PiShip (DOM nếu có) + phí dịch vụ (tính) + phí GD (DOM).
+ * Phụ phí = cố định + DV + GD + PiShip (DOM) + tiếp thị liên kết (DOM) + NTTD.
+ * NTTD: đơn có dòng → DOM hoặc 1%; tính giá ($) → 1% khi useNttdInPricing.
  */
 export function computeSellerSettlement(data, feeConfig) {
-  const productBase = Math.max(0, data.productTotal);
+  const shopAdj = data.shopProductAdjustment ?? 0;
+  const productBase = Math.max(0, data.productTotal + shopAdj);
   const quantity = Math.max(1, Math.floor(data.quantity ?? 1));
   const shippingBuyer = Math.max(0, data.shippingBuyerForPayment ?? 0);
   const sellerShippingBurden = data.sellerShippingBurden ?? 0;
@@ -149,14 +233,43 @@ export function computeSellerSettlement(data, feeConfig) {
     data.domPayment != null
       ? Math.round(data.domPayment)
       : Math.round(paymentBase * feeConfig.paymentFeeRate);
-  const platformFeesTotal = commission + piShip + serviceBundle + payment;
-  const vat = Math.round(productBase * (feeConfig.vatRate ?? 0));
-  const pit = Math.round(productBase * (feeConfig.pitRate ?? 0));
+  const affiliateCommission =
+    data.domAffiliateCommission != null
+      ? Math.round(data.domAffiliateCommission)
+      : 0;
+  const applyNttd =
+    data.hasNttdRow ||
+    (data.includeNttdInPricing === true &&
+      feeConfig.useNttdInPricing !== false);
+  const nttdDisplay = applyNttd
+    ? data.hasNttdRow && data.domNttdDisplay != null
+      ? Math.round(data.domNttdDisplay)
+      : Math.round(productBase * (feeConfig.nttdDisplayRate ?? 0.01))
+    : 0;
+  const platformFeesTotal =
+    commission +
+    piShip +
+    serviceBundle +
+    payment +
+    affiliateCommission +
+    nttdDisplay;
+  const vat = data.hasTaxRows
+    ? Math.round(productBase * (feeConfig.vatRate ?? 0))
+    : 0;
+  const pit = data.hasTaxRows
+    ? Math.round(productBase * (feeConfig.pitRate ?? 0))
+    : 0;
   const taxTotal = vat + pit;
   const sellerIncome =
-    data.productTotal + sellerShippingBurden - platformFeesTotal - taxTotal;
+    data.productTotal +
+    shopAdj +
+    sellerShippingBurden -
+    platformFeesTotal -
+    taxTotal;
   return {
     productTotal: data.productTotal,
+    shopProductAdjustment: shopAdj,
+    netProductBase: productBase,
     quantity,
     shippingBuyerForPayment: shippingBuyer,
     sellerShippingBurden,
@@ -169,6 +282,8 @@ export function computeSellerSettlement(data, feeConfig) {
     infrastructure,
     serviceBundle,
     payment,
+    affiliateCommission,
+    nttdDisplay,
     platformFeesTotal,
     vatGtgt: vat,
     pitTncn: pit,
@@ -177,7 +292,28 @@ export function computeSellerSettlement(data, feeConfig) {
     usedDomCommission: data.domCommission != null,
     usedDomPayment: data.domPayment != null,
     usedDomPiShip: data.domPiShip != null,
+    usedDomAffiliate: data.domAffiliateCommission != null,
+    hasNttdRow: !!data.hasNttdRow,
+    usedDomNttd: data.domNttdDisplay != null,
   };
+}
+
+/** Dòng phí lấy trực tiếp từ đơn Shopee (không tính % extension). */
+export function isSettlementRowFromDom(role, calc) {
+  switch (role) {
+    case "commission":
+      return !!calc.usedDomCommission;
+    case "payment":
+      return !!calc.usedDomPayment;
+    case "piShip":
+      return !!calc.usedDomPiShip;
+    case "affiliateCommission":
+      return !!calc.usedDomAffiliate;
+    case "nttdDisplayFee":
+      return !!calc.usedDomNttd;
+    default:
+      return false;
+  }
 }
 
 /** Kết quả âm cho UI đối soát đơn */
@@ -185,18 +321,26 @@ export function computeExtensionSettlement(data, feeConfig) {
   const s = computeSellerSettlement(data, feeConfig);
   return {
     ...data,
+    productTotal: s.productTotal,
+    netProductBase: s.netProductBase,
+    shopProductAdjustment: s.shopProductAdjustment,
     productBase: s.productBase,
     paymentBase: s.paymentBase,
     rateSum: s.rateSum,
     usedDomCommission: s.usedDomCommission,
     usedDomPayment: s.usedDomPayment,
     usedDomPiShip: s.usedDomPiShip,
+    usedDomAffiliate: s.usedDomAffiliate,
+    hasNttdRow: s.hasNttdRow,
+    usedDomNttd: s.usedDomNttd,
     commission: -s.commission,
     piShip: -s.piShip,
     serviceBundle: -s.serviceBundle,
     infrastructure: -s.infrastructure,
     voucherXtra: -s.voucherXtra,
     payment: -s.payment,
+    affiliateCommission: -s.affiliateCommission,
+    nttdDisplay: -s.nttdDisplay,
     platformFeesTotal: -s.platformFeesTotal,
     vatGtgt: -s.vatGtgt,
     pitTncn: -s.pitTncn,
@@ -224,6 +368,10 @@ export function expectedValueForRow(role, calc) {
       return calc.serviceBundle;
     case "payment":
       return calc.payment;
+    case "affiliateCommission":
+      return calc.affiliateCommission;
+    case "nttdDisplayFee":
+      return calc.hasNttdRow ? calc.nttdDisplay : null;
     case "platformFeesTotal":
       return calc.platformFeesTotal;
     case "vatGtgt":
@@ -253,8 +401,19 @@ export function rowCheckTitle(role, calc) {
   if (role === "payment" && calc.usedDomPayment) {
     return "Phí xử lý GD — lấy từ đơn Shopee";
   }
+  if (role === "affiliateCommission" && calc.usedDomAffiliate) {
+    return "Hoa hồng Tiếp thị liên kết — lấy từ đơn (seller cài)";
+  }
+  if (role === "nttdDisplayFee" && calc.hasNttdRow) {
+    if (calc.usedDomNttd) return "Phí NTTD — lấy từ đơn Shopee";
+    return `Phí NTTD = 1% × tiền hàng (${calc.netProductBase?.toLocaleString("vi-VN") ?? "?"}đ)`;
+  }
   if (role === "serviceBundle") {
-    return `Phí Dịch Vụ = Hạ tầng ${formatSigned(calc.infrastructure)} + Voucher Xtra ${formatSigned(calc.voucherXtra)}`;
+    const netHint =
+      calc.netProductBase != null && calc.netProductBase !== calc.productTotal
+        ? ` (VX trên ${calc.netProductBase.toLocaleString("vi-VN")}đ sau trợ giá/shop)`
+        : "";
+    return `Phí Dịch Vụ = Hạ tầng ${formatSigned(calc.infrastructure)} + Voucher Xtra ${formatSigned(calc.voucherXtra)}${netHint}`;
   }
   if (role === "payment") {
     return `Phí xử lý GD (cơ số ${calc.paymentBase.toLocaleString("vi-VN")}đ)`;

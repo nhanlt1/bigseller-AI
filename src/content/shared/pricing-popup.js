@@ -5,7 +5,7 @@ import {
 } from '../../pricing/category-commission.js';
 import { formatVnd } from '../../pricing/formula-engine.js';
 import { formatPriceInputValue, parsePriceInput } from '../../pricing/price-input.js';
-import { evaluateOrderProfit, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
+import { buildPricingOrderInput, evaluateOrderProfit, pricingOrderOptsFromCalc, resolvePricingTarget, solveMinUnitPriceByTarget, } from '../../pricing/order-profit.js';
 import { evaluateTiers } from '../../pricing/wholesale-tiers.js';
 import {
     isExtensionContextAlive,
@@ -22,6 +22,7 @@ const PRICE_FIELD_IDS = [
     'sell-price',
     'cost-receive',
     'infra',
+    'shop-discount',
 ];
 /** @typedef {'sell' | 'receive'} PricingPopupTab */
 
@@ -145,6 +146,7 @@ export class PricingPopup {
         calc.desiredNetReceivePerUnit = price('net-receive');
         calc.retailUnitPrice = price('sell-price');
         calc.receiveQuantity = Math.max(1, Math.floor(num('receive-qty')) || 1);
+        calc.shopDiscountPerOrder = price('shop-discount');
         fee.commissionRate = num('commission') / 100;
         fee.paymentFeeRate = num('payment') / 100;
         fee.voucherXtraRate = num('voucher-xtra') / 100;
@@ -157,6 +159,9 @@ export class PricingPopup {
         fee.usePiShip =
             this.shadow.getElementById('use-piship')?.checked ??
                 false;
+        fee.useNttdInPricing =
+            this.shadow.getElementById('use-nttd')?.checked ?? true;
+        fee.nttdDisplayRate = num('nttd') / 100;
         calc.wholesaleTiers = [];
         for (let i = 0; i < 5; i++) {
             calc.wholesaleTiers.push({
@@ -237,23 +242,27 @@ export class PricingPopup {
           <section class="section fees-shared">
             <h3>Phí sàn Shopee (cùng công thức đối soát đơn)</h3>
             ${catHint}
+            <label class="field"><span>Trợ giá / mã shop (đ/đơn)</span>
+              <input type="text" inputmode="decimal" id="shop-discount" autocomplete="off" value="${c.shopDiscountPerOrder || ''}" placeholder="VD: 7244 (VX tính sau khoản này)" /></label>
             <div class="fee-grid">
-              <label class="field"><span>Phí cố định %</span>
-                <input type="number" id="commission" min="0" max="100" step="0.1" value="${(f.commissionRate * 100).toFixed(2)}" /></label>
-              <label class="field"><span>Phí xử lý GD %</span>
-                <input type="number" id="payment" min="0" max="100" step="0.1" value="${(f.paymentFeeRate * 100).toFixed(2)}" /></label>
+              <label class="field"><span>Phí cố định</span>
+                <span class="input-suffix-wrap"><input type="number" id="commission" min="0" max="100" step="0.1" value="${(f.commissionRate * 100).toFixed(2)}" /><span class="input-suffix">%</span></span></label>
+              <label class="field"><span>Phí xử lý GD</span>
+                <span class="input-suffix-wrap"><input type="number" id="payment" min="0" max="100" step="0.1" value="${(f.paymentFeeRate * 100).toFixed(2)}" /><span class="input-suffix">%</span></span></label>
               <label class="field"><span>Phí hạ tầng (đ/đơn)</span>
                 <input type="text" inputmode="decimal" id="infra" autocomplete="off" value="${f.infrastructureFeePerOrder || ''}" placeholder="VD: 3k" /></label>
             </div>
             <label class="check"><input type="checkbox" id="use-voucher-xtra" ${f.useVoucherXtra ? 'checked' : ''} />
-              Voucher Xtra <input type="number" id="voucher-xtra" min="0" max="100" step="0.1" value="${(f.voucherXtraRate * 100).toFixed(2)}" />%</label>
+              Voucher Xtra <span class="input-suffix-wrap inline"><input type="number" id="voucher-xtra" min="0" max="100" step="0.1" value="${(f.voucherXtraRate * 100).toFixed(2)}" /><span class="input-suffix">%</span></span></label>
             <label class="check"><input type="checkbox" id="use-piship" ${f.usePiShip ? 'checked' : ''} />
               PiShip (+${f.piShipFeePerOrder}đ/đơn khi bật)</label>
+            <label class="check"><input type="checkbox" id="use-nttd" ${f.useNttdInPricing !== false ? 'checked' : ''} />
+              Phí dịch vụ hiển thị NTTD <span class="input-suffix-wrap inline"><input type="number" id="nttd" min="0" max="100" step="0.1" value="${((f.nttdDisplayRate ?? 0.01) * 100).toFixed(2)}" /><span class="input-suffix">%</span></span> (tiền hàng sau trợ giá)</label>
             <div class="fee-grid">
-              <label class="field"><span>Thuế GTGT % (tiền hàng)</span>
-                <input type="number" id="vat" min="0" max="100" step="0.1" value="${((f.vatRate ?? 0) * 100).toFixed(2)}" /></label>
-              <label class="field"><span>Thuế TNCN % (tiền hàng)</span>
-                <input type="number" id="pit" min="0" max="100" step="0.1" value="${((f.pitRate ?? 0) * 100).toFixed(2)}" /></label>
+              <label class="field"><span>Thuế GTGT (tiền hàng)</span>
+                <span class="input-suffix-wrap"><input type="number" id="vat" min="0" max="100" step="0.1" value="${((f.vatRate ?? 0) * 100).toFixed(2)}" /><span class="input-suffix">%</span></span></label>
+              <label class="field"><span>Thuế TNCN (tiền hàng)</span>
+                <span class="input-suffix-wrap"><input type="number" id="pit" min="0" max="100" step="0.1" value="${((f.pitRate ?? 0) * 100).toFixed(2)}" /><span class="input-suffix">%</span></span></label>
             </div>
           </section>
         </div>
@@ -371,7 +380,11 @@ export class PricingPopup {
         this.updateResults();
     };
     formatSettlementHint(s) {
-        return `Phụ phí ${formatVnd(s.platformFeesTotal)} · Thuế ${formatVnd(s.taxTotal)} · Thu nhập ${formatVnd(s.sellerIncome)}`;
+        const nttd =
+            s.nttdDisplay > 0
+                ? ` · NTTD ${formatVnd(s.nttdDisplay)}`
+                : '';
+        return `Phụ phí ${formatVnd(s.platformFeesTotal)}${nttd} · Thuế ${formatVnd(s.taxTotal)} · Thu nhập ${formatVnd(s.sellerIncome)}`;
     }
     updateReceiveResults() {
         if (!this.settings)
@@ -388,12 +401,15 @@ export class PricingPopup {
                 '<p class="error">Nhập giá bán hiện tại (đ/sp).</p>';
             return;
         }
-        const ev = evaluateOrderProfit({
-            quantity: qty,
-            unitPrice: price,
-            costPerUnit: c.costPerUnit,
-            feeConfig: f,
-        });
+        const ev = evaluateOrderProfit(
+            buildPricingOrderInput({
+                quantity: qty,
+                unitPrice: price,
+                costPerUnit: c.costPerUnit,
+                feeConfig: f,
+                pricingCalculator: c,
+            }),
+        );
         const s = ev.settlement;
         const netTotal = Math.round(ev.sellerIncome);
         const netPerUnit = Math.round(ev.sellerIncome / qty);
@@ -425,9 +441,10 @@ export class PricingPopup {
         }
         const c = this.settings.pricingCalculator;
         const f = this.settings.platformFeeConfig;
+        const orderOpts = pricingOrderOptsFromCalc(f, c);
         const target = resolvePricingTarget(c);
         const retailPrice = target
-            ? solveMinUnitPriceByTarget(1, c.costPerUnit, target, f)
+            ? solveMinUnitPriceByTarget(1, c.costPerUnit, target, f, orderOpts)
             : null;
         const retailEl = this.shadow.getElementById('retail-results');
         if (retailEl) {
@@ -440,12 +457,15 @@ export class PricingPopup {
                     '<p class="error">Không tính được giá — giảm % phí hoặc mục tiêu nhập.</p>';
             }
             else {
-                const ev = evaluateOrderProfit({
-                    quantity: 1,
-                    unitPrice: retailPrice,
-                    costPerUnit: c.costPerUnit,
-                    feeConfig: f,
-                });
+                const ev = evaluateOrderProfit(
+                    buildPricingOrderInput({
+                        quantity: 1,
+                        unitPrice: retailPrice,
+                        costPerUnit: c.costPerUnit,
+                        feeConfig: f,
+                        pricingCalculator: c,
+                    }),
+                );
                 const s = ev.settlement;
                 const incomePerUnit = Math.round(ev.sellerIncome);
                 const outcomeLine = target.kind === 'profit'
@@ -462,7 +482,7 @@ export class PricingPopup {
         const tierEl = this.shadow.getElementById('tier-results');
         if (!tierEl)
             return;
-        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c, f);
+        const evals = evaluateTiers(c.wholesaleTiers, c.costPerUnit, c, f, orderOpts);
         if (evals.length === 0) {
             tierEl.innerHTML = '<p class="muted">Nhập ít nhất một bậc (min ≤ max, SL &gt; 0).</p>';
             return;
@@ -474,7 +494,7 @@ export class PricingPopup {
                 continue;
             const valid = tier.qtyMin > 0 && tier.qtyMax >= tier.qtyMin;
             const price = valid && target
-                ? solveMinUnitPriceByTarget(tier.qtyMin, c.costPerUnit, target, f)
+                ? solveMinUnitPriceByTarget(tier.qtyMin, c.costPerUnit, target, f, orderOpts)
                 : null;
             cell.textContent = price != null ? formatVnd(price) : '—';
             cell.className = price != null ? 'tier-price ok' : 'tier-price';
@@ -623,6 +643,25 @@ const POPUP_STYLES = `
     box-sizing: border-box;
   }
   .fee-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .input-suffix-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+  }
+  .input-suffix-wrap.inline { width: auto; flex-shrink: 0; }
+  .input-suffix-wrap input { flex: 1; min-width: 0; }
+  .input-suffix-wrap.inline input {
+    flex: none;
+    width: 56px;
+    padding: 4px 6px;
+  }
+  .input-suffix {
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+    flex-shrink: 0;
+  }
   .check {
     display: flex;
     align-items: center;
@@ -631,7 +670,6 @@ const POPUP_STYLES = `
     margin: 6px 0;
     flex-wrap: wrap;
   }
-  .check input[type="number"] { width: 56px; padding: 4px 6px; }
   .tier-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   .tier-table th, .tier-table td { padding: 4px; text-align: left; }
   .tier-label { font-weight: 600; color: #6b7280; white-space: nowrap; }

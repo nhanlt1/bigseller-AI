@@ -1,4 +1,5 @@
 import {
+    detectShopeeCurrentPage,
     findSimilarProductCards,
     parseProductIdsFromUrl,
     readSimilarCardTitle,
@@ -21,10 +22,6 @@ const HIGHLIGHT_CSS = `
     transform: scale(1.02);
     filter: hue-rotate(25deg) brightness(1.2);
   }
-}
-@keyframes bigseller-sparkle-twinkle {
-  0%, 100% { opacity: 0.4; transform: rotate(45deg) scale(0.8); }
-  50% { opacity: 1; transform: rotate(45deg) scale(1.25); }
 }
 #${LAYER_ID} {
   position: fixed;
@@ -59,17 +56,6 @@ const HIGHLIGHT_CSS = `
     0 0 38px rgba(232, 121, 248, 0.55),
     inset 0 0 18px rgba(255, 255, 255, 0.4);
   animation: bigseller-halo-pulse 1.1s ease-in-out infinite;
-}
-.bigseller-hl-sparkle {
-  position: fixed;
-  width: 14px;
-  height: 14px;
-  background: linear-gradient(135deg, #fff 0%, #bae6fd 35%, #f0abfc 70%, #fde68a 100%);
-  box-shadow:
-    0 0 10px rgba(255, 255, 255, 1),
-    0 0 18px rgba(96, 165, 250, 0.9);
-  animation: bigseller-sparkle-twinkle 1.2s ease-in-out infinite;
-  pointer-events: none;
 }
 .bigseller-hl-label {
   position: fixed;
@@ -137,15 +123,6 @@ function titleMatchScore(query, rowTitle) {
     return 0;
 }
 
-function getCurrentPageNumber() {
-    return (
-        Number.parseInt(
-            new URLSearchParams(location.search).get('page') ?? '1',
-            10,
-        ) || 1
-    );
-}
-
 /**
  * @param {Record<string, unknown>} row
  * @returns {HTMLElement | null}
@@ -159,7 +136,7 @@ export function findProductCardElementForRow(row) {
     const title = String(row.title ?? row.matchedTitle ?? '').trim();
     const rank = Number.parseInt(String(row.rank ?? ''), 10);
     const rowPage = Number.parseInt(String(row.page ?? ''), 10);
-    const currentPage = getCurrentPageNumber();
+    const currentPage = detectShopeeCurrentPage();
 
     if (itemId) {
         for (const card of cards) {
@@ -227,19 +204,6 @@ function layoutHighlightOverlay(rect, layer) {
         ringWrap.style.height = `${height}px`;
     }
 
-    const sparkles = layer.querySelectorAll('.bigseller-hl-sparkle');
-    const corners = [
-        [left, top],
-        [left + width, top],
-        [left, top + height],
-        [left + width, top + height],
-    ];
-    sparkles.forEach((gem, i) => {
-        const [cx, cy] = corners[i] ?? corners[0];
-        gem.style.left = `${cx - 7}px`;
-        gem.style.top = `${cy - 7}px`;
-    });
-
     const label = layer.querySelector('.bigseller-hl-label');
     if (label && label.textContent) {
         const labelH = label.offsetHeight || 36;
@@ -273,12 +237,6 @@ function createHighlightLayer() {
     label.hidden = true;
 
     layer.append(halo, ringWrap, label);
-    for (let i = 0; i < 4; i++) {
-        const gem = document.createElement('span');
-        gem.className = 'bigseller-hl-sparkle';
-        gem.style.animationDelay = `${i * 0.2}s`;
-        layer.appendChild(gem);
-    }
     return layer;
 }
 
@@ -354,7 +312,7 @@ function resolveHighlightLabel(row, positionMeta) {
  */
 export function focusProductCardForRow(row, positionMeta) {
     const rowPage = Number.parseInt(String(row?.page ?? ''), 10);
-    const currentPage = getCurrentPageNumber();
+    const currentPage = detectShopeeCurrentPage();
     const card = findProductCardElementForRow(row);
     if (!card) {
         if (Number.isFinite(rowPage) && rowPage !== currentPage) {

@@ -1,44 +1,36 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
 import { buildPromptProductContext, sanitizeRewrittenProduct, } from '../../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, parseGeminiProductJson, } from '../../shared/storage.js';
+import { getDescriptionToolbarPlacement } from './product-editor-anchors.js';
+import {
+    mountFloatingEditorToolbar,
+    refreshEditorToolbar,
+    setEditorToolbarBusy,
+} from './product-editor-toolbar.js';
+
 const PANEL_HOST_ID = 'bigseller-ai-panel-host';
-/** Hàng nút tròn góc phải — đồng bộ với image-fab */
+
+/** Neo FAB nghiên cứu SP tương tự (Shopee) */
 export const FAB_ROW_BOTTOM_PX = 24;
 export const FAB_SIZE_PX = 48;
 export const FAB_GAP_PX = 10;
 export const FAB_IMAGE_RIGHT_PX = 56;
-export const FAB_TEXT_AI_RIGHT_PX = FAB_IMAGE_RIGHT_PX + FAB_SIZE_PX + FAB_GAP_PX;
-const PANEL_HOST_RIGHT_PX = FAB_TEXT_AI_RIGHT_PX + 82;
+
+/** Logic viết lại / copy / áp dụng — không còn panel UI (nút nằm trên toolbar inline). */
 export class FloatingPanel {
     adapter;
-    shadow;
-    host;
     state = 'idle';
     settings = null;
-    statusEl;
-    titlePreviewEl;
-    descPreviewEl;
-    rewriteTitleBtn;
-    rewriteDescBtn;
-    rewriteBothBtn;
-    copyPromptBtn;
-    applyBtn;
     lastResult = null;
     waitingGemini = false;
     rewriteGeneration = 0;
+
     constructor(adapter) {
         this.adapter = adapter;
-        const existing = document.getElementById(PANEL_HOST_ID);
-        if (existing)
-            existing.remove();
-        this.host = document.createElement('div');
-        this.host.id = PANEL_HOST_ID;
-        this.host.style.display = 'none';
-        this.shadow = this.host.attachShadow({ mode: 'closed' });
-        document.body.appendChild(this.host);
-        this.render();
+        document.getElementById(PANEL_HOST_ID)?.remove();
         void this.loadSettings();
     }
+
     async loadSettings() {
         try {
             this.settings = await getSettings();
@@ -47,6 +39,7 @@ export class FloatingPanel {
             /* storage/messaging đã nhắc F5 hoặc dùng mặc định */
         }
     }
+
     setState(state, message, options) {
         this.state = state;
         if (options?.waitingGemini !== undefined) {
@@ -55,70 +48,11 @@ export class FloatingPanel {
         else if (state !== 'busy') {
             this.waitingGemini = false;
         }
-        const labels = {
-            idle: 'Sẵn sàng',
-            busy: 'Đang xử lý…',
-            done: 'Hoàn tất',
-            error: 'Lỗi',
-        };
-        this.statusEl.textContent = message ?? labels[state];
-        this.statusEl.dataset.state = state;
-        const busy = state === 'busy';
-        this.rewriteTitleBtn.disabled = busy;
-        this.rewriteDescBtn.disabled = busy;
-        this.rewriteBothBtn.disabled = busy;
-        this.copyPromptBtn.disabled = busy;
-        this.applyBtn.disabled = false;
-        this.applyBtn.title = this.waitingGemini
-            ? 'Hủy chờ Gemini và áp dụng từ clipboard'
-            : 'Áp dụng JSON từ clipboard vào form';
+        if (state === 'error' && message) {
+            alert(message);
+        }
     }
-    render() {
-        this.shadow.innerHTML = `
-      <style>${PANEL_STYLES}</style>
-      <div class="panel" part="panel">
-        <header class="panel-header">
-          <span class="logo">BigSeller AI</span>
-          <button type="button" class="btn-icon" id="close-btn" title="Thu gọn">×</button>
-        </header>
-        <div class="panel-body">
-          <p class="status" id="status">Sẵn sàng</p>
-          <p class="hint" id="flow-hint">Chọn phần cần viết lại — Gemini tự gửi và áp dụng vào form</p>
-          <div class="preview">
-            <label>Tiêu đề mới</label>
-            <div class="preview-box" id="title-preview">—</div>
-            <label>Mô tả mới</label>
-            <div class="preview-box desc" id="desc-preview">—</div>
-          </div>
-          <div class="actions">
-            <div class="rewrite-row">
-              <button type="button" class="btn primary compact" id="rewrite-title-btn">Tên SP</button>
-              <button type="button" class="btn primary compact" id="rewrite-desc-btn">Mô tả</button>
-              <button type="button" class="btn primary compact" id="rewrite-both-btn">Tên + mô tả</button>
-            </div>
-            <button type="button" class="btn" id="copy-prompt-btn">Copy prompt</button>
-            <button type="button" class="btn" id="apply-btn" title="Áp dụng JSON từ clipboard vào form">Áp dụng vào form</button>
-          </div>
-        </div>
-      </div>
-    `;
-        this.statusEl = this.shadow.getElementById('status');
-        this.titlePreviewEl = this.shadow.getElementById('title-preview');
-        this.descPreviewEl = this.shadow.getElementById('desc-preview');
-        this.rewriteTitleBtn = this.shadow.getElementById('rewrite-title-btn');
-        this.rewriteDescBtn = this.shadow.getElementById('rewrite-desc-btn');
-        this.rewriteBothBtn = this.shadow.getElementById('rewrite-both-btn');
-        this.copyPromptBtn = this.shadow.getElementById('copy-prompt-btn');
-        this.applyBtn = this.shadow.getElementById('apply-btn');
-        this.shadow.getElementById('close-btn').addEventListener('click', () => {
-            this.host.style.display = 'none';
-        });
-        this.rewriteTitleBtn.addEventListener('click', () => void this.handleRewrite('title'));
-        this.rewriteDescBtn.addEventListener('click', () => void this.handleRewrite('description'));
-        this.rewriteBothBtn.addEventListener('click', () => void this.handleRewrite('both'));
-        this.copyPromptBtn.addEventListener('click', () => void this.handleCopyPrompt());
-        this.applyBtn.addEventListener('click', () => void this.handleApply());
-    }
+
     promptContextFromPage() {
         const product = this.adapter.extract();
         if (!product?.title && !product?.description)
@@ -126,6 +60,7 @@ export class FloatingPanel {
         const platform = this.adapter.platform ?? 'shopee';
         return buildPromptProductContext(product, platform);
     }
+
     async handleRewrite(scope = 'both') {
         const ctx = this.promptContextFromPage();
         if (!ctx) {
@@ -140,20 +75,8 @@ export class FloatingPanel {
             this.setState('error', 'Không đọc được mô tả từ form');
             return;
         }
-        const busyLabels = {
-            title: 'Đang viết lại tiêu đề…',
-            description: 'Đang viết lại mô tả…',
-            both: 'Đang viết lại tiêu đề + mô tả…',
-        };
-        const doneLabels = {
-            title: 'Đã viết lại tiêu đề và áp dụng vào form',
-            description: 'Đã viết lại mô tả và áp dụng vào form',
-            both: 'Đã viết lại và áp dụng vào form',
-        };
         const generation = ++this.rewriteGeneration;
-        this.setState('busy', busyLabels[scope] ?? busyLabels.both, {
-            waitingGemini: true,
-        });
+        this.setState('busy', undefined, { waitingGemini: true });
         try {
             const settings = this.settings ?? (await getSettings());
             const result = await sendMessage({
@@ -173,11 +96,9 @@ export class FloatingPanel {
             }
             const data = sanitizeRewrittenProduct(result.data, ctx.shopName);
             this.lastResult = data;
-            this.titlePreviewEl.textContent = data.title || '—';
-            this.descPreviewEl.textContent = data.description || '—';
             const ok = this.adapter.apply(data);
             this.setState(ok ? 'done' : 'error', ok
-                ? (doneLabels[scope] ?? doneLabels.both)
+                ? undefined
                 : 'Có JSON nhưng không điền được form — kiểm tra trang');
         }
         catch (err) {
@@ -185,12 +106,13 @@ export class FloatingPanel {
                 return;
             const msg = err instanceof Error ? err.message : 'Không viết lại được';
             if (msg.includes('Đã hủy chờ Gemini')) {
-                this.setState('idle', 'Đã hủy chờ Gemini');
+                this.setState('idle');
                 return;
             }
             this.setState('error', msg);
         }
     }
+
     async handleCopyPrompt() {
         const ctx = this.promptContextFromPage();
         if (!ctx) {
@@ -213,12 +135,13 @@ export class FloatingPanel {
             if (!tabResult.ok) {
                 throw new Error(tabResult.error ?? 'Không mở được tab Gemini');
             }
-            this.setState('done', 'Đã copy prompt — dán vào Gemini, copy JSON phản hồi rồi bấm Áp dụng vào form');
+            this.setState('done');
         }
         catch (err) {
             this.setState('error', err instanceof Error ? err.message : 'Không copy được prompt');
         }
     }
+
     async handleApply() {
         if (this.waitingGemini) {
             this.rewriteGeneration += 1;
@@ -240,153 +163,88 @@ export class FloatingPanel {
             }
             const data = sanitizeRewrittenProduct(parsed, ctx?.shopName ?? '');
             this.lastResult = data;
-            this.titlePreviewEl.textContent = data.title || '—';
-            this.descPreviewEl.textContent = data.description || '—';
             const ok = this.adapter.apply(data);
             this.setState(ok ? 'done' : 'error', ok
-                ? 'Đã áp dụng vào form'
+                ? undefined
                 : 'Parse OK nhưng không điền được form — kiểm tra trang sản phẩm');
         }
         catch (err) {
             this.setState('error', err instanceof Error ? err.message : 'Không áp dụng được');
         }
     }
-    show() {
-        this.host.style.display = 'block';
+
+    rewrite(scope) {
+        return this.handleRewrite(scope);
+    }
+
+    copyPrompt() {
+        return this.handleCopyPrompt();
+    }
+
+    applyFromClipboard() {
+        return this.handleApply();
     }
 }
-const PANEL_STYLES = `
-  :host {
-    all: initial;
-    position: fixed;
-    bottom: 24px;
-    right: ${PANEL_HOST_RIGHT_PX}px;
-    z-index: 2147483646;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    font-size: 13px;
-  }
-  .panel {
-    width: 360px;
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.18);
-    border: 1px solid #e5e7eb;
-    overflow: hidden;
-  }
-  .panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: linear-gradient(135deg, #ee4d2d, #ff7337);
-    color: #fff;
-  }
-  .logo { font-weight: 700; font-size: 14px; }
-  .btn-icon {
-    background: transparent;
-    border: none;
-    color: #fff;
-    font-size: 20px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 0 4px;
-  }
-  .panel-body { padding: 12px 14px; }
-  .status {
-    margin: 0 0 6px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    background: #f3f4f6;
-    font-size: 12px;
-  }
-  .hint {
-    margin: 0 0 10px;
-    font-size: 11px;
-    color: #6b7280;
-    line-height: 1.35;
-  }
-  .status[data-state="error"] { background: #fef2f2; color: #b91c1c; }
-  .status[data-state="done"] { background: #ecfdf5; color: #047857; }
-  .status[data-state="busy"] { background: #eff6ff; color: #1d4ed8; }
-  .preview label {
-    display: block;
-    font-size: 11px;
-    font-weight: 600;
-    color: #6b7280;
-    margin-bottom: 4px;
-  }
-  .preview-box {
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    padding: 8px;
-    margin-bottom: 10px;
-    max-height: 60px;
-    overflow: auto;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-  .preview-box.desc { max-height: 100px; }
-  .actions { display: flex; flex-direction: column; gap: 8px; }
-  .rewrite-row {
-    display: flex;
-    flex-direction: row;
-    gap: 6px;
-  }
-  .btn.compact {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 8px 6px;
-    font-size: 11px;
-    line-height: 1.2;
-  }
-  .btn {
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid #d1d5db;
-    background: #fff;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .btn.primary {
-    background: #ee4d2d;
-    border-color: #ee4d2d;
-    color: #fff;
-  }
-`;
-export function mountToggleButton(panel) {
-    const btnId = 'bigseller-ai-toggle';
-    if (document.getElementById(btnId))
-        return;
-    const btn = document.createElement('button');
-    btn.id = btnId;
-    btn.textContent = 'Mô tả AI';
-    btn.title = 'BigSeller AI — viết lại tiêu đề/mô tả (Gemini)';
-    Object.assign(btn.style, {
-        position: 'fixed',
-        bottom: `${FAB_ROW_BOTTOM_PX}px`,
-        right: `${FAB_TEXT_AI_RIGHT_PX}px`,
-        zIndex: '2147483645',
-        minWidth: `${FAB_SIZE_PX}px`,
-        height: `${FAB_SIZE_PX}px`,
-        padding: '0 10px',
-        borderRadius: '24px',
-        border: 'none',
-        background: '#6b7280',
-        color: '#fff',
-        fontWeight: '700',
-        fontSize: '11px',
-        letterSpacing: '-0.02em',
-        cursor: 'pointer',
-        boxShadow: '0 4px 14px rgba(107,114,128,.45)',
-        lineHeight: '1',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        whiteSpace: 'nowrap',
+
+export const DESC_TOOLBAR_ID = 'bigseller-ai-desc-toolbar';
+
+/** Nút viết lại + copy/áp dụng — neo vùng mô tả (BigSeller / Shopee). */
+export function mountProductDescriptionToolbar(panel, platform) {
+    document.getElementById('bigseller-ai-toggle')?.remove();
+    const busyWrap = async (fn) => {
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, true);
+        try {
+            await fn();
+        }
+        finally {
+            setEditorToolbarBusy(DESC_TOOLBAR_ID, false);
+        }
+    };
+    mountFloatingEditorToolbar({
+        hostId: DESC_TOOLBAR_ID,
+        tone: 'text',
+        wrap: platform === 'bigseller',
+        getPlacement: () => getDescriptionToolbarPlacement(platform),
+        buttons: [
+            {
+                id: 'rewrite-title',
+                label: 'Tên SP',
+                primary: true,
+                onClick: () => busyWrap(() => panel.rewrite('title')),
+            },
+            {
+                id: 'rewrite-desc',
+                label: 'Mô tả',
+                primary: true,
+                onClick: () => busyWrap(() => panel.rewrite('description')),
+            },
+            {
+                id: 'rewrite-both',
+                label: 'Tên + mô tả',
+                primary: true,
+                onClick: () => busyWrap(() => panel.rewrite('both')),
+            },
+            {
+                id: 'copy-prompt',
+                label: 'Copy prompt',
+                ghost: true,
+                onClick: () => busyWrap(() => panel.copyPrompt()),
+            },
+            {
+                id: 'apply',
+                label: 'Áp dụng',
+                ghost: true,
+                onClick: () => busyWrap(() => panel.applyFromClipboard()),
+            },
+        ],
     });
-    btn.addEventListener('click', () => panel.show());
-    document.body.appendChild(btn);
+}
+
+export function refreshDescriptionToolbar() {
+    refreshEditorToolbar(DESC_TOOLBAR_ID);
+}
+
+/** @deprecated dùng mountProductDescriptionToolbar */
+export function mountToggleButton(panel) {
+    mountProductDescriptionToolbar(panel, panel.adapter?.platform ?? 'shopee');
 }

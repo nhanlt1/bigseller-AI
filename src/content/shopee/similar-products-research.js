@@ -2,6 +2,10 @@ import { MessageType, sendMessage } from '../../shared/messaging.js';
 import { isSiblingShopId, SIBLING_SHOPEE_SHOPS } from '../../shared/shop-names.js';
 import { copyTableToClipboard, downloadCsv } from '../../shared/table-export.js';
 import { FAB_IMAGE_RIGHT_PX, FAB_ROW_BOTTOM_PX, FAB_SIZE_PX } from '../shared/panel.js';
+import {
+    installSearchLayoutWatch,
+    syncShopeeSearchPageLayout,
+} from './similar-products-search-layout.js';
 import { buildSimilarProductsTitleResearchPrompt } from './similar-products-title-prompt.js';
 import { focusProductCardForRow } from './similar-products-card-focus.js';
 import {
@@ -12,6 +16,7 @@ import {
     RESEARCH_EXPORT_COLUMNS,
     RESEARCH_TABLE_COLUMNS,
     buildTableRows,
+    detectShopeeCurrentPage,
     scrapeCurrentPage,
 } from './similar-products-scraper.js';
 
@@ -25,6 +30,7 @@ const SIDEBAR_DEFAULT_WIDTH = 420;
 let panelInstance = null;
 let researchFabEl = null;
 let lastAutoIngestFingerprint = '';
+let lastIngestPage = null;
 let autoCollectScheduleTimer = null;
 let navigationWatchInstalled = false;
 let cardWatchInstalled = false;
@@ -231,6 +237,18 @@ function updateFabPosition() {
     }
 }
 
+function syncSearchPageLayout() {
+    const open = !!panelInstance?.visible;
+    syncShopeeSearchPageLayout({
+        open,
+        sidebarWidth: panelInstance?.getSidebarWidth() ?? SIDEBAR_DEFAULT_WIDTH,
+    });
+    installSearchLayoutWatch(
+        open,
+        () => panelInstance?.getSidebarWidth() ?? SIDEBAR_DEFAULT_WIDTH,
+    );
+}
+
 function purgeDomMainRows() {
     researchStore.rows = researchStore.rows.filter((r) => r.kind !== 'Chính');
     for (const key of [...researchStore.seenKeys]) {
@@ -266,6 +284,7 @@ function ensureResearchSession() {
     const loaded = loadMyProductTitleSlots(sessionKey);
     researchStore.myProductTitleSlots = loaded;
     lastAutoIngestFingerprint = '';
+    lastIngestPage = null;
     panelInstance?.applyMyProductTitleToInput();
     try {
         sessionStorage.removeItem(SIDEBAR_DISMISSED_KEY);
@@ -354,7 +373,10 @@ export function installSimilarProductsNavigationWatch() {
     if (navigationWatchInstalled)
         return;
     navigationWatchInstalled = true;
-    const onNav = () => scheduleAutoCollect();
+    const onNav = () => {
+        lastAutoIngestFingerprint = '';
+        scheduleAutoCollect();
+    };
     window.addEventListener('popstate', onNav);
     const { pushState, replaceState } = history;
     history.pushState = function (...args) {
@@ -367,14 +389,21 @@ export function installSimilarProductsNavigationWatch() {
         onNav();
         return result;
     };
-}
-
-function getCurrentPageNumber() {
-    return (
-        Number.parseInt(
-            new URLSearchParams(location.search).get('page') ?? '1',
-            10,
-        ) || 1
+    document.addEventListener(
+        'click',
+        (ev) => {
+            const t = ev.target;
+            if (!(t instanceof Element))
+                return;
+            if (
+                !t.closest(
+                    '.shopee-page-controller, .shopee-mini-page-controller, [class*="page-controller"]',
+                )
+            )
+                return;
+            onNav();
+        },
+        true,
     );
 }
 
@@ -393,7 +422,10 @@ export function autoIngestCurrentPage() {
     ensureResearchSession();
     if (!isSimilarPageReady())
         return { added: 0, total: researchStore.rows.length };
-    const page = getCurrentPageNumber();
+    const page = detectShopeeCurrentPage();
+    if (lastIngestPage != null && lastIngestPage !== page)
+        lastAutoIngestFingerprint = '';
+    lastIngestPage = page;
     const { similar } = scrapeCurrentPage();
     const fingerprint =
         getResearchSessionKey() +
@@ -410,6 +442,8 @@ export function autoIngestCurrentPage() {
             `Trang ${page}: +${added} dòng (tổng ${total}).`,
         );
     }
+    if (panelInstance?.visible)
+        syncSearchPageLayout();
     return { added, total };
 }
 
@@ -449,6 +483,7 @@ class SimilarResearchPanel {
             /* private mode */
         }
         updateFabPosition();
+        syncSearchPageLayout();
     }
 
     open() {
@@ -460,11 +495,12 @@ class SimilarResearchPanel {
         this.applyMyProductTitleToInput();
         scheduleAutoCollect();
         updateFabPosition();
+        syncSearchPageLayout();
         const total = researchStore.rows.length;
         this.syncFromStore(
             total > 0
-                ? `Bảng ${total} dòng — tự động lấy trang ${getCurrentPageNumber()} đang xem.`
-                : `Đang chờ trang ${getCurrentPageNumber()} tải xong…`,
+                ? `Bảng ${total} dòng — tự động lấy trang ${detectShopeeCurrentPage()} đang xem.`
+                : `Đang chờ trang ${detectShopeeCurrentPage()} tải xong…`,
         );
     }
 
@@ -483,6 +519,7 @@ class SimilarResearchPanel {
             }
         }
         updateFabPosition();
+        syncSearchPageLayout();
     }
 
     persistMyProductTitleFromInput() {

@@ -1,7 +1,12 @@
 import { shopeeAdapter } from './adapter.js';
 import { listenForProductApply } from '../shared/apply-listener.js';
-import { mountImageFab } from '../shared/image-fab.js';
-import { FloatingPanel, mountToggleButton } from '../shared/panel.js';
+import { mountImageFab, refreshImageToolbar, IMAGE_TOOLBAR_ID } from '../shared/image-fab.js';
+import {
+    FloatingPanel,
+    mountProductDescriptionToolbar,
+    refreshDescriptionToolbar,
+    DESC_TOOLBAR_ID,
+} from '../shared/panel.js';
 import { mountPricingFab } from '../shared/pricing-popup.js';
 import { observeDomChanges } from '../shared/dom-utils.js';
 import { isShopeeOrderDetailUrl, mountOrderDetailCheck } from './order-detail-check.js';
@@ -17,6 +22,8 @@ import {
 } from './shopee-host.js';
 
 listenForProductApply(shopeeAdapter);
+
+let editorPanel = null;
 
 function initSimilarProductsResearch() {
     if (!isShopeeProductResearchUrl())
@@ -38,8 +45,9 @@ function initProductEditor() {
         return;
     mountProductCategoryFeeBadge();
     mountImageFab(shopeeAdapter);
-    const panel = new FloatingPanel(shopeeAdapter);
-    mountToggleButton(panel);
+    if (!editorPanel)
+        editorPanel = new FloatingPanel(shopeeAdapter);
+    mountProductDescriptionToolbar(editorPanel, 'shopee');
 }
 
 function initSellerCenterExtras() {
@@ -76,8 +84,14 @@ observeDomChanges(() => {
     updateProductCategoryFeeBadge();
     if (isShopeeOrderDetailUrl())
         return;
-    if (!document.getElementById('bigseller-ai-toggle') ||
-        !document.getElementById('bigseller-ai-image-fab')) {
+    if (
+        !document.getElementById(IMAGE_TOOLBAR_ID) ||
+        !document.getElementById(DESC_TOOLBAR_ID)
+    ) {
         initProductEditor();
+    }
+    else {
+        refreshImageToolbar();
+        refreshDescriptionToolbar();
     }
 });

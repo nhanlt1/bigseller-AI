@@ -194,6 +194,8 @@ export const DEFAULT_PRICING_CALCULATOR = {
   retailUnitPrice: 0,
   /** Số lượng SP/đơn — tab tính giá thực nhận */
   receiveQuantity: 1,
+  /** Trợ giá / mã shop (đ/đơn, nhập số dương) — Voucher Xtra tính trên tiền hàng sau khoản này */
+  shopDiscountPerOrder: 0,
   wholesaleTiers: [
     { qtyMin: 2, qtyMax: 5, unitPrice: 0 },
     { qtyMin: 6, qtyMax: 10, unitPrice: 0 },

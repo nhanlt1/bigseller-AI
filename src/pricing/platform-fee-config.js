@@ -12,6 +12,9 @@ export const DEFAULT_SHOPEE_FEE_CONFIG = {
     /** Thuế trên tiền hàng (khớp dòng Thuế GTGT / TNCN trên đơn) */
     vatRate: 0.01,
     pitRate: 0.005,
+    /** Phí NTTD — 1% tiền hàng (popup $ / tính giá); đối soát đơn chỉ khi có dòng trên đơn */
+    nttdDisplayRate: 0.01,
+    useNttdInPricing: true,
 };
 export function calcVoucherXtraFee(productBase, config, quantity = 1) {
     if (!config.useVoucherXtra || productBase <= 0)
@@ -25,6 +28,8 @@ export function getRateSum(config) {
     let sum = config.commissionRate + config.paymentFeeRate;
     if (config.useVoucherXtra)
         sum += config.voucherXtraRate;
+    if (config.useNttdInPricing !== false)
+        sum += config.nttdDisplayRate ?? 0.01;
     return sum;
 }
 export function getFixedFeesPerOrder(config) {
