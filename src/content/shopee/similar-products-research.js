@@ -626,6 +626,21 @@ class SimilarResearchPanel {
         }
     }
 
+    async onCopyTableTitle(rowIndex) {
+        const title = String(this.rows[rowIndex]?.title ?? '').trim();
+        if (!title) {
+            this.setStatus('Không có tên SP để copy.');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(title);
+            this.setStatus('Đã copy tên SP.');
+        }
+        catch {
+            this.setStatus('Không copy được tên SP.');
+        }
+    }
+
     setStatus(text) {
         const el = this.shadow.getElementById('status');
         if (el)
@@ -728,6 +743,15 @@ class SimilarResearchPanel {
             void this.copyTitleResearchPrompt();
         });
         this.shadow.getElementById('table-wrap')?.addEventListener('click', (ev) => {
+            const copyBtn = ev.target.closest('.title-copy-btn');
+            if (copyBtn) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const idx = Number.parseInt(copyBtn.dataset.rowIndex ?? '', 10);
+                if (Number.isFinite(idx))
+                    void this.onCopyTableTitle(idx);
+                return;
+            }
             const btn = ev.target.closest('.title-nav-btn');
             if (!btn)
                 return;
@@ -857,7 +881,10 @@ class SimilarResearchPanel {
                         text = `<a href="${escapeAttr(v)}" target="_blank" rel="noopener">Mở</a>`;
                     }
                     else if (c.key === 'title' && siblingRow && v) {
-                        text = `<button type="button" class="title-nav-btn" data-row-index="${rowIndex}" title="Bấm để cuộn tới SP trên trang Shopee">${escapeHtml(v)}</button>`;
+                        text = `<div class="title-nav-cell">
+              <button type="button" class="title-nav-btn" data-row-index="${rowIndex}" title="Bấm để cuộn tới SP trên trang Shopee">${escapeHtml(v)}</button>
+              <button type="button" class="title-copy-btn" data-row-index="${rowIndex}" title="Copy tên SP" aria-label="Copy tên SP">Copy</button>
+            </div>`;
                     }
                     else {
                         text = escapeHtml(v);
@@ -1259,9 +1286,16 @@ const PANEL_STYLES = `
   .data-table tr.row-sibling-shop.row-main td {
     background: #dbeafe;
   }
+  .title-nav-cell {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+  }
   .title-nav-btn {
     display: block;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     margin: 0;
     padding: 0;
     border: none;
@@ -1282,6 +1316,39 @@ const PANEL_STYLES = `
     outline: 2px solid #2563eb;
     outline-offset: 2px;
     border-radius: 2px;
+  }
+  .title-copy-btn {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 2px 6px;
+    border: 1px solid #a7f3d0;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: #047857;
+    cursor: pointer;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+  .title-nav-cell:hover .title-copy-btn,
+  .title-nav-cell:focus-within .title-copy-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .title-copy-btn:hover {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #065f46;
+  }
+  .title-copy-btn:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
   }
   .data-table a { color: #2563eb; }
   .empty {
