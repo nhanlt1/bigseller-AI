@@ -8,7 +8,10 @@ import {
   scrapeCurrentPage,
 } from "./similar-products-scraper.js";
 import { resolveMyProductDisplayPosition } from "./similar-products-title-position.js";
-import { setOptimizeCrawlActive } from "./similar-products-research.js";
+import {
+  ingestPageIntoResearchTable,
+  setOptimizeCrawlActive,
+} from "./similar-products-research.js";
 
 const CARD_WAIT_SELECTORS = [
   'div[role="group"][aria-label^="Product card"]',
@@ -26,17 +29,13 @@ const CAPTCHA_SELECTORS = [
   ".nc-container",
 ];
 
-const SCROLL_STEP_PX = 400;
-const SCROLL_STABLE_ROUNDS = 5;
-const DEFAULT_MIN_PRODUCT_CARDS = 55;
-const SCROLL_MAX_WAIT_MS = 150_000;
-const DEFAULT_SCROLL_SETTLE_MS = 2500;
-const CARD_LOAD_POLL_MS = 1000;
-const CARD_LOAD_STABLE_ROUNDS = 5;
-const INITIAL_CARD_WAIT_MS = 120_000;
-const KEYWORD_URL_MATCH_MS = 45_000;
-const KEYWORD_FRESH_MIN_MS = 3000;
-const KEYWORD_FRESH_MAX_MS = 18000;
+/** Sau khi URL khớp từ khóa — chờ 1 s rồi PageDown */
+const KEYWORD_SETTLE_MS = 1000;
+/** Khoảng cách giữa mỗi lần PageDown */
+const PAGE_DOWN_INTERVAL_MS = 500;
+const KEYWORD_URL_MATCH_MS = 30_000;
+const MIN_SANITY_PRODUCTS = 5;
+const MAX_PAGE_DOWN_STEPS = 80;
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -99,8 +98,44 @@ export function detectShopeeCaptcha(root = document) {
   return false;
 }
 
+function dispatchKey(key, code, keyCode) {
+  const init = {
+    key,
+    code,
+    keyCode,
+    which: keyCode,
+    bubbles: true,
+    cancelable: true,
+    view: window,
+  };
+  for (const target of [
+    document.activeElement,
+    document.body,
+    document.documentElement,
+  ]) {
+    if (!target) continue;
+    target.dispatchEvent(new KeyboardEvent("keydown", init));
+    target.dispatchEvent(new KeyboardEvent("keyup", init));
+  }
+}
+
+function isAtPageBottom() {
+  const maxScroll =
+    Math.max(
+      document.documentElement.scrollHeight,
+      document.body?.scrollHeight ?? 0,
+    ) - window.innerHeight;
+  return window.scrollY >= maxScroll - 4;
+}
+
+/** PageDown — kèm scroll fallback (~ một viewport). */
+function pressPageDown() {
+  dispatchKey("PageDown", "PageDown", 34);
+  window.scrollBy({ top: window.innerHeight * 0.92, behavior: "instant" });
+}
+
 async function navigateToKeywordSearch(keyword, navigateDelayMs, signal, skipNavigate) {
-  const settleMs = Math.max(Number(navigateDelayMs) || 0, 3000);
+  const settleMs = Math.max(Number(navigateDelayMs) || 0, KEYWORD_SETTLE_MS);
   if (skipNavigate) {
     if (!isOnKeywordSearchPage(keyword)) {
       throw new Error(
@@ -115,173 +150,69 @@ async function navigateToKeywordSearch(keyword, navigateDelayMs, signal, skipNav
     location.assign(targetUrl);
     await sleep(settleMs, signal);
     try {
-      await waitForElement(CARD_WAIT_SELECTORS, 30000);
+      await waitForElement(CARD_WAIT_SELECTORS, 20000);
     } catch {
-      /* kiểm tra ở waitForProductCardsReady */
+      /* pageDownToBottom sẽ thử tiếp */
     }
     return;
   }
   await sleep(settleMs, signal);
 }
 
-/** Chờ URL khớp từ khóa rồi DOM kết quả mới (tránh đếm thẻ SP cũ). */
-async function waitForKeywordSearchFresh(keyword, signal) {
+async function waitForKeywordUrl(keyword, signal) {
   const startedAt = Date.now();
-  let urlMatchedAt = 0;
-
   while (Date.now() - startedAt < KEYWORD_URL_MATCH_MS) {
     signal?.throwIfAborted();
     if (isOnKeywordSearchPage(keyword)) {
-      urlMatchedAt = Date.now();
-      break;
+      window.scrollTo({ top: 0, behavior: "instant" });
+      return;
     }
-    await sleep(350, signal);
+    await sleep(300, signal);
   }
-  if (!urlMatchedAt) {
+  throw new Error(
+    `Tab search chưa chuyển sang từ khóa «${keyword}» — đợi trang tải xong rồi thử lại`,
+  );
+}
+
+/** PageDown mỗi 500 ms tới cuối trang — tới cuối là xong, không chờ thêm. */
+async function pageDownToBottom(signal) {
+  window.scrollTo({ top: 0, behavior: "instant" });
+
+  for (let step = 0; step < MAX_PAGE_DOWN_STEPS; step++) {
+    signal?.throwIfAborted();
+    if (isAtPageBottom()) break;
+
+    pressPageDown();
+    await sleep(PAGE_DOWN_INTERVAL_MS, signal);
+    ingestPageIntoResearchTable();
+  }
+
+  ingestPageIntoResearchTable();
+}
+
+/** Đợi 1 s → PageDown tới cuối trang → scrape ngay. */
+async function loadSearchResultsByPageDown(keyword, signal) {
+  await waitForKeywordUrl(keyword, signal);
+  await sleep(KEYWORD_SETTLE_MS, signal);
+
+  try {
+    await waitForElement(CARD_WAIT_SELECTORS, 8000);
+  } catch {
+    /* vẫn PageDown — có thể DOM chậm */
+  }
+
+  await pageDownToBottom(signal);
+
+  const scraped = scrapeCurrentPage().similar.length;
+  const count = Math.max(scraped, findSimilarProductCards().length);
+
+  if (count <= MIN_SANITY_PRODUCTS) {
     throw new Error(
-      `Tab search chưa chuyển sang từ khóa «${keyword}» — đợi trang tải xong rồi thử lại`,
+      `Chỉ thấy ${count} SP cho «${keyword}» — trang chưa tải đủ (cần > ${MIN_SANITY_PRODUCTS})`,
     );
   }
 
-  window.scrollTo({ top: 0, behavior: "instant" });
-  await sleep(600, signal);
-
-  let sawLowCount = false;
-  const freshDeadline = urlMatchedAt + KEYWORD_FRESH_MAX_MS;
-
-  while (Date.now() < freshDeadline) {
-    signal?.throwIfAborted();
-    if (!isOnKeywordSearchPage(keyword)) {
-      urlMatchedAt = Date.now();
-      sawLowCount = false;
-    }
-
-    const count = findSimilarProductCards().length;
-    if (count <= 8) {
-      sawLowCount = true;
-    }
-
-    const elapsed = Date.now() - urlMatchedAt;
-    if (sawLowCount && elapsed >= KEYWORD_FRESH_MIN_MS) {
-      break;
-    }
-    if (!sawLowCount && elapsed >= KEYWORD_FRESH_MIN_MS + 2000) {
-      break;
-    }
-
-    await sleep(CARD_LOAD_POLL_MS, signal);
-  }
-}
-
-/** Chờ đủ thẻ SP (mặc định ~55) ổn định trước khi scroll/scrape. */
-async function waitForProductCardsReady(keyword, minProductCards, signal, timeoutMs = INITIAL_CARD_WAIT_MS) {
-  await waitForKeywordSearchFresh(keyword, signal);
-
-  const target = Math.max(
-    1,
-    Number(minProductCards) || DEFAULT_MIN_PRODUCT_CARDS,
-  );
-  let lastCount = 0;
-  let stableRounds = 0;
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    signal?.throwIfAborted();
-    if (!isOnKeywordSearchPage(keyword)) {
-      stableRounds = 0;
-      lastCount = 0;
-      await waitForKeywordSearchFresh(keyword, signal);
-    }
-
-    try {
-      await waitForElement(CARD_WAIT_SELECTORS, 4000);
-    }
-    catch {
-      /* chưa render thẻ — poll tiếp */
-    }
-
-    const count = findSimilarProductCards().length;
-    if (count >= target && count === lastCount) {
-      stableRounds += 1;
-      if (stableRounds >= CARD_LOAD_STABLE_ROUNDS)
-        return count;
-    }
-    else {
-      stableRounds = 0;
-    }
-    lastCount = count;
-
-    if (count > 0 && count < target) {
-      window.scrollBy({ top: SCROLL_STEP_PX, behavior: "instant" });
-    }
-    await sleep(CARD_LOAD_POLL_MS, signal);
-  }
-
-  const finalCount = findSimilarProductCards().length;
-  if (finalCount < target) {
-    throw new Error(
-      `Chỉ thấy ${finalCount}/${target} thẻ SP cho «${keyword}» — trang chưa tải đủ, thử tăng delay trong Cài đặt`,
-    );
-  }
-  return finalCount;
-}
-
-function isAtPageBottom() {
-  const maxScroll =
-    Math.max(
-      document.documentElement.scrollHeight,
-      document.body?.scrollHeight ?? 0,
-    ) - window.innerHeight;
-  return window.scrollY >= maxScroll - 4;
-}
-
-async function slowScrollPageOne(
-  scrollStepDelayMs,
-  scrollSettleMs,
-  minProductCards,
-  signal,
-) {
-  const target = Math.max(
-    1,
-    Number(minProductCards) || DEFAULT_MIN_PRODUCT_CARDS,
-  );
-  let stableRounds = 0;
-  let lastCount = 0;
-  const startedAt = Date.now();
-
-  window.scrollTo({ top: 0, behavior: "instant" });
-  await sleep(400, signal);
-
-  while (true) {
-    signal?.throwIfAborted();
-    const count = findSimilarProductCards().length;
-    const atBottom = isAtPageBottom();
-    const reachedTarget = count >= target;
-    const timedOut = Date.now() - startedAt > SCROLL_MAX_WAIT_MS;
-
-    if (reachedTarget && atBottom && count === lastCount) {
-      stableRounds += 1;
-      if (stableRounds >= SCROLL_STABLE_ROUNDS)
-        break;
-    }
-    else {
-      stableRounds = 0;
-    }
-    lastCount = count;
-
-    if (timedOut)
-      break;
-
-    if (!atBottom) {
-      window.scrollBy({ top: SCROLL_STEP_PX, behavior: "instant" });
-      await sleep(scrollStepDelayMs, signal);
-      continue;
-    }
-
-    await sleep(Math.max(scrollStepDelayMs, 1200), signal);
-  }
-
-  await sleep(scrollSettleMs ?? DEFAULT_SCROLL_SETTLE_MS, signal);
+  return count;
 }
 
 function filterByMinSold(rows, minSold) {
@@ -291,6 +222,17 @@ function filterByMinSold(rows, minSold) {
     const sold = Number(row.soldNumeric);
     if (!Number.isFinite(sold)) return true;
     return sold >= threshold;
+  });
+}
+
+function sortBySoldDesc(rows) {
+  return [...rows].sort((a, b) => {
+    const sa = Number(a.soldNumeric);
+    const sb = Number(b.soldNumeric);
+    if (!Number.isFinite(sa) && !Number.isFinite(sb)) return 0;
+    if (!Number.isFinite(sa)) return 1;
+    if (!Number.isFinite(sb)) return -1;
+    return sb - sa;
   });
 }
 
@@ -328,9 +270,8 @@ function resolveSourcePosition(tableRows, { sourceItemId, sourceTitle }) {
  *   sourceItemId?: string,
  *   sourceTitle?: string,
  *   navigateDelayMs?: number,
- *   scrollStepDelayMs?: number,
- *   scrollSettleMs?: number,
  *   signal?: AbortSignal,
+ *   skipNavigate?: boolean,
  * }} opts
  */
 export async function crawlKeywordSearch(opts) {
@@ -341,16 +282,9 @@ export async function crawlKeywordSearch(opts) {
 
   const settings = await getSettings();
   const navigateDelayMs = Math.max(
-    opts.navigateDelayMs ?? settings.optimizeNavigateDelayMs ?? 4000,
-    3000,
+    opts.navigateDelayMs ?? settings.optimizeNavigateDelayMs ?? KEYWORD_SETTLE_MS,
+    KEYWORD_SETTLE_MS,
   );
-  const scrollStepDelayMs = Math.max(
-    opts.scrollStepDelayMs ?? settings.optimizeScrollStepDelayMs ?? 900,
-    500,
-  );
-  const scrollSettleMs = opts.scrollSettleMs ?? DEFAULT_SCROLL_SETTLE_MS;
-  const minProductCards =
-    opts.minProductCards ?? settings.optimizeMinProductCards ?? DEFAULT_MIN_PRODUCT_CARDS;
   const minSold = opts.minSold ?? settings.optimizeMinSold ?? 1;
   const signal = opts.signal;
 
@@ -367,34 +301,25 @@ export async function crawlKeywordSearch(opts) {
       return { status: "captcha", keyword, competitors: [], sourcePosition: null };
     }
 
-    await waitForProductCardsReady(keyword, minProductCards, signal);
+    await loadSearchResultsByPageDown(keyword, signal);
 
     if (detectShopeeCaptcha()) {
       return { status: "captcha", keyword, competitors: [], sourcePosition: null };
     }
 
-    await slowScrollPageOne(
-      scrollStepDelayMs,
-      scrollSettleMs,
-      minProductCards,
-      signal,
-    );
-
-    if (detectShopeeCaptcha()) {
-      return { status: "captcha", keyword, competitors: [], sourcePosition: null };
-    }
-
+    ingestPageIntoResearchTable();
     const { similar } = scrapeCurrentPage();
     const tableRows = similar
       .map((product) => productToTableRow(product))
       .filter(Boolean);
     const filtered = filterByMinSold(tableRows, minSold);
     const deduped = dedupeByTitle(filtered);
-    const competitors = mapRowsToOptimizeSerp(deduped, keyword);
     const sourcePosition = resolveSourcePosition(deduped, {
       sourceItemId: opts.sourceItemId,
       sourceTitle: opts.sourceTitle,
     });
+    const bySold = sortBySoldDesc(deduped);
+    const competitors = mapRowsToOptimizeSerp(bySold, keyword);
 
     return {
       status: "ok",
@@ -419,9 +344,6 @@ export async function handleShopeeSearchCrawl(payload, signal) {
     sourceItemId: payload?.sourceItemId,
     sourceTitle: payload?.sourceTitle,
     navigateDelayMs: payload?.navigateDelayMs,
-    scrollStepDelayMs: payload?.scrollStepDelayMs,
-    scrollSettleMs: payload?.scrollSettleMs,
-    minProductCards: payload?.minProductCards,
     skipNavigate: payload?.skipNavigate === true,
     signal,
   });

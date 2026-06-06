@@ -292,6 +292,11 @@ export function scheduleAutoCollect() {
     }, AUTO_COLLECT_SETTLE_MS);
 }
 
+/** Pipeline tối ưu — cập nhật bảng nghiên cứu (nếu đang mở) và trả tổng dòng. */
+export function ingestPageIntoResearchTable() {
+    return autoIngestCurrentPage();
+}
+
 /** Tự động lấy dữ liệu trang hiện tại — cùng URL thì cộng dồn, không trùng */
 export function autoIngestCurrentPage() {
     ensureResearchSession();

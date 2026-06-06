@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BigSeller AI — Luồng Tự động tối ưu SEO</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e7ecf3;
+      --muted: #9aa8bc;
+      --accent: #3b82f6;
+      --accent2: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --border: #334155;
+      --code-bg: #0d1117;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 15px;
+    }
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f1419 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 1.5rem 2rem;
+    }
+    header h1 { margin: 0 0 0.5rem; font-size: 1.85rem; font-weight: 700; }
+    header p { margin: 0; color: var(--muted); max-width: 52rem; }
+    main { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    h2 {
+      margin: 2.5rem 0 1rem;
+      font-size: 1.35rem;
+      color: #fff;
+      border-left: 4px solid var(--accent);
+      padding-left: 0.75rem;
+    }
+    h3 { margin: 1.75rem 0 0.75rem; font-size: 1.1rem; color: #cbd5e1; }
+    p, li { color: #c8d3e0; }
+    a { color: #60a5fa; }
+    .toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .toc ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .toc li { margin: 0.35rem 0; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      margin: 1rem 0;
+    }
+    .card.warn { border-color: #92400e; background: #1c1910; }
+    .card.ok { border-color: #166534; background: #0f1a14; }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+    .badge-ui { background: #1d4ed8; color: #dbeafe; }
+    .badge-sw { background: #7c3aed; color: #ede9fe; }
+    .badge-gemini { background: #059669; color: #d1fae5; }
+    .badge-shopee { background: #ea580c; color: #ffedd5; }
+    .badge-msg { background: #475569; color: #f1f5f9; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface2); color: #fff; }
+    code, pre {
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.88em;
+    }
+    code {
+      background: var(--code-bg);
+      padding: 0.12rem 0.35rem;
+      border-radius: 4px;
+      color: #93c5fd;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      overflow-x: auto;
+      line-height: 1.45;
+      color: #cbd5e1;
+    }
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin: 1.25rem 0;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 3rem 1fr;
+      gap: 0 1rem;
+      position: relative;
+    }
+    .step-num {
+      width: 2.25rem;
+      height: 2.25rem;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      z-index: 1;
+    }
+    .step-body {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.15rem;
+      margin-bottom: 0.75rem;
+    }
+    .step-body h4 { margin: 0 0 0.4rem; font-size: 1rem; color: #fff; }
+    .step-body p:last-child { margin-bottom: 0; }
+    .step:not(:last-child)::before {
+      content: "";
+      position: absolute;
+      left: 1.1rem;
+      top: 2.25rem;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+    .meta { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+    .file { color: #a5b4fc; }
+    ul.compact { margin: 0.4rem 0; padding-left: 1.2rem; }
+    ul.compact li { margin: 0.25rem 0; }
+    footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+    @media print {
+      body { background: #fff; color: #111; }
+      header { background: #f8fafc; }
+      .card, .step-body, .toc { background: #f8fafc; border-color: #ccc; }
+      h2 { color: #111; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Tự động tối ưu SEO — Luồng chạy chi tiết</h1>
+  <p>
+    Tài liệu mô tả từng bước pipeline <strong>Tự động tối ưu</strong> của extension BigSeller AI:
+    Gemini gợi ý từ khóa → crawl SERP trang 1 trên <code>shopee.vn/search</code> → Gemini phân tích → tự áp dụng tiêu đề/mô tả vào form sản phẩm.
+  </p>
+</header>
+
+<main>
+
+  <nav class="toc">
+    <strong>Mục lục</strong>
+    <ol>
+      <li><a href="#chuan-bi">Chuẩn bị &amp; cách chạy (người dùng)</a></li>
+      <li><a href="#tong-quan">Tổng quan kiến trúc</a></li>
+      <li><a href="#pipeline">Pipeline 4 giai đoạn (chi tiết code)</a></li>
+      <li><a href="#crawl">Chi tiết crawl từng từ khóa</a></li>
+      <li><a href="#gemini">Tương tác Gemini (2 lần)</a></li>
+      <li><a href="#messages">Bảng message Chrome</a></li>
+      <li><a href="#files">File mã nguồn liên quan</a></li>
+      <li><a href="#settings">Cài đặt pipeline</a></li>
+      <li><a href="#captcha">CAPTCHA &amp; Hủy / Tiếp tục</a></li>
+      <li><a href="#loi">Lỗi thường gặp</a></li>
+    </ol>
+  </nav>
+
+  <!-- ========== USER GUIDE ========== -->
+  <h2 id="chuan-bi">1. Chuẩn bị &amp; cách chạy (người dùng)</h2>
+
+  <div class="card ok">
+    <strong>Điều kiện trước khi chạy</strong>
+    <ul class="compact">
+      <li>Extension đã load unpacked từ thư mục gốc repo (có <code>manifest.json</code>).</li>
+      <li>Đã đăng nhập <strong>Shopee Seller</strong> hoặc <strong>BigSeller</strong> — mở trang <em>sửa/chi tiết sản phẩm</em>.</li>
+      <li>Tab <strong>Gemini</strong> (<code>gemini.google.com/app</code>) — extension sẽ mở/focus nếu chưa có.</li>
+      <li>Tab <strong>Shopee consumer</strong> (<code>shopee.vn</code>, không phải <code>banhang.shopee.vn</code>) — dùng để crawl tìm kiếm.</li>
+      <li>Form sản phẩm đã có <strong>tiêu đề hoặc mô tả</strong> (extension đọc từ form, không dùng danh sách «Tên SP của tôi» trên trang search).</li>
+    </ul>
+  </div>
+
+  <h3>Các bước thao tác</h3>
+  <ol>
+    <li><strong>Reload extension</strong> trên <code>chrome://extensions</code> sau mỗi lần sửa code.</li>
+    <li>Mở trang sửa sản phẩm trên Shopee Seller hoặc BigSeller.</li>
+    <li>Tìm thanh công cụ neo cạnh vùng mô tả — bấm nút <strong>Tự động tối ưu</strong>.</li>
+    <li>Overlay <em>Tự động tối ưu SEO</em> hiện tiến trình; tab Gemini và tab Shopee search sẽ được điều khiển tự động.</li>
+    <li>Chờ pipeline hoàn tất (~ vài phút tùy số từ khóa). Khi xong, tiêu đề/mô tả mới được điền vào form — <strong>kiểm tra và Lưu</strong> trên Shopee/BigSeller.</li>
+    <li>Nếu Shopee hiện CAPTCHA trên tab tìm kiếm: giải CAPTCHA thủ công, rồi bấm <strong>Tiếp tục</strong> trên overlay.</li>
+    <li>Muốn dừng giữa chừng: bấm <strong>Hủy</strong>.</li>
+  </ol>
+
+  <p class="meta">
+    (Tuỳ chọn) Vào <strong>Cài đặt extension → Tự động tối ưu SEO</strong> để chỉnh số từ khóa, delay crawl, prompt Gemini.
+  </p>
+
+  <!-- ========== ARCHITECTURE ========== -->
+  <h2 id="tong-quan">2. Tổng quan kiến trúc</h2>
+
+  <pre>
+┌─────────────────────┐     OPTIMIZE_PRODUCT      ┌──────────────────────────┐
+│ Tab Seller/BigSeller│ ────────────────────────► │ Service Worker (SW)      │
+│ panel.js + adapter  │ ◄── OPTIMIZE_PROGRESS ─── │ handleOptimizeProduct()  │
+└─────────────────────┘                           └───────────┬──────────────┘
+                                                                │
+                    ┌───────────────────────────────────────────┼───────────────────────────┐
+                    │                                           │                           │
+                    ▼                                           ▼                           ▼
+         ┌──────────────────┐                      ┌─────────────────────┐      ┌─────────────────────┐
+         │ Tab Gemini       │                      │ Tab shopee.vn/search │      │ chrome.storage.sync │
+         │ GEMINI_SEND_     │                      │ SHOPEE_SEARCH_CRAWL  │      │ settings (delay,    │
+         │ PROMPT × 2       │                      │ search-crawl-runner  │      │ prompts, max kw…)   │
+         └──────────────────┘                      └─────────────────────┘      └─────────────────────┘
+  </pre>
+
+  <p>
+    <span class="badge badge-sw">SW</span> Service worker là <em>orchestrator</em> — điều phối tuần tự, một tab search duy nhất, không crawl song song nhiều từ khóa.
+    Timeout toàn pipeline: <strong>15 phút</strong>. Chờ CAPTCHA tối đa <strong>10 phút</strong>.
+  </p>
+
+  <!-- ========== PIPELINE ========== -->
+  <h2 id="pipeline">3. Pipeline 4 giai đoạn (chi tiết code)</h2>
+
+  <div class="flow">
+
+    <div class="step">
+      <div class="step-num">0</div>
+      <div class="step-body">
+        <h4><span class="badge badge-ui">UI</span> Bấm «Tự động tối ưu»</h4>
+        <p>
+          <span class="file">src/content/shared/panel.js</span> → <code>handleOptimize()</code>:
+        </p>
+        <ul class="compact">
+          <li>Gọi <code>adapter.extract()</code> + <code>extractIds()</code> → payload: <code>title</code>, <code>description</code>, <code>shopName</code>, <code>itemId</code>, <code>shopId</code>, <code>platform</code>.</li>
+          <li>Hiện overlay qua <code>showOptimizeProgress()</code> (<span class="file">optimize-progress.js</span>).</li>
+          <li>Gửi message <code>OPTIMIZE_PRODUCT</code> tới SW qua <code>sendMessage()</code>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4><span class="badge badge-gemini">Gemini</span> Bước 1 — Gợi ý từ khóa</h4>
+        <p>
+          <span class="file">src/background/service-worker.js</span> → <code>handleOptimizeProduct()</code>:
+        </p>
+        <ul class="compact">
+          <li>Đọc settings từ <code>getSettings()</code>.</li>
+          <li><code>buildKeywordPrompt(product, settings)</code> — <span class="file">optimize-prompts.js</span>; biến: <code>{title}</code>, <code>{description}</code>, <code>{shopName}</code>, <code>{language}</code>.</li>
+          <li><code>sendGeminiSchemaPrompt({ expectedSchema: 'keywords' })</code> → tab Gemini.</li>
+          <li>Content Gemini: điền prompt, bấm Send, <code>response-tracker.js</code> poll đến khi có JSON hợp lệ.</li>
+          <li><code>parseGeminiKeywordsJson()</code> → mảng keywords; cắt tối đa <code>optimizeMaxKeywords</code> (mặc định 8).</li>
+        </ul>
+        <p class="meta">Đầu ra mong đợi: <code>{"keywords":["cụm 1","cụm 2",…]}</code></p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4><span class="badge badge-shopee">Shopee</span> Bước 2 — Crawl SERP từng từ khóa</h4>
+        <p>
+          <code>openOrReuseSearchTab()</code> — tìm tab <code>shopee.vn/search</code> hoặc tab consumer Shopee; nếu không có thì tạo mới.
+        </p>
+        <p>Vòng lặp <code>for (keyword of keywords)</code>:</p>
+        <ul class="compact">
+          <li>Gửi progress: <em>Tìm kiếm trang 1 (i/n): «keyword»</em>.</li>
+          <li><code>navigateSearchTabToKeyword()</code> — SW dùng <code>chrome.tabs.update</code> (không <code>location.assign</code> trong content script).</li>
+          <li><code>crawlKeywordOnSearchTab()</code> → message <code>SHOPEE_SEARCH_CRAWL</code> với <code>skipNavigate: true</code>.</li>
+          <li>Content <span class="file">search-crawl-runner.js</span> crawl trang 1, trả <code>competitors[]</code> + <code>sourcePosition</code>.</li>
+          <li>Delay giữa từ khóa: <code>optimizeBetweenKeywordDelayMs</code> (mặc định 3500 ms).</li>
+        </ul>
+        <p>Nếu tổng đối thủ crawl được = 0 → pipeline dừng với lỗi (không gọi Gemini bước 2).</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4><span class="badge badge-gemini">Gemini</span> Bước 3 — Phân tích &amp; viết lại</h4>
+        <ul class="compact">
+          <li><code>buildAnalysisPrompt({ ...product, crawlResults }, settings)</code> — chèn <code>{sourcePositionsBlock}</code> và <code>{competitorsTsv}</code> (TSV từ <code>OPTIMIZE_SERP_COLUMNS</code>).</li>
+          <li><code>sendGeminiSchemaPrompt({ expectedSchema: 'product' })</code>.</li>
+          <li><code>parseGeminiProductJson()</code> → <code>{ title, description }</code>.</li>
+          <li><code>sanitizeRewrittenProduct()</code> — lọc tên shop, ký tự không hợp lệ.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h4><span class="badge badge-ui">UI</span> Bước 4 — Áp dụng vào form</h4>
+        <ul class="compact">
+          <li><code>applyToSellerTab(sellerTabId, data)</code> → message <code>APPLY_PRODUCT</code> tới adapter Shopee/BigSeller.</li>
+          <li>Focus lại tab seller.</li>
+          <li>Progress: <em>Đã áp dụng tiêu đề và mô tả mới vào form</em> + <code>done: true</code> → overlay đóng.</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ========== CRAWL DETAIL ========== -->
+  <h2 id="crawl">4. Chi tiết crawl từng từ khóa</h2>
+  <p>File: <span class="file">src/content/shopee/search-crawl-runner.js</span> — hàm <code>crawlKeywordSearch()</code></p>
+
+  <table>
+    <thead>
+      <tr><th>#</th><th>Bước nội bộ</th><th>Mô tả</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><code>setOptimizeCrawlActive(true)</code></td>
+        <td>Báo <span class="file">similar-products-research.js</span> đang crawl — không reload «Tên SP của tôi» khi URL đổi keyword.</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>navigateToKeywordSearch(..., skipNavigate)</code></td>
+        <td>Khi <code>skipNavigate: true</code> (SW đã navigate): chỉ kiểm tra URL khớp keyword + sleep settle (≥ 3000 ms). Không gọi <code>location.assign</code>.</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>detectShopeeCaptcha()</code></td>
+        <td>Phát hiện iframe captcha / text xác minh. Trả <code>{ status: 'captcha' }</code> → SW chờ user bấm Tiếp tục.</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>waitForKeywordSearchFresh(keyword)</code></td>
+        <td>Chờ URL <code>?keyword=</code> khớp; scroll lên đầu; chờ DOM kết quả <em>mới</em> (tránh đếm thẻ SP cũ từ keyword trước). Tối đa ~45 s chờ URL; ~18 s chờ DOM fresh.</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>waitForProductCardsReady(keyword, minProductCards)</code></td>
+        <td>Poll thẻ SP — mặc định cần ≥ <strong>55</strong> thẻ, ổn định <strong>5</strong> vòng poll liên tiếp (mỗi 1 s). Timeout 120 s → throw nếu chưa đủ.</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>slowScrollPageOne()</code></td>
+        <td>Scroll từng bước 400 px, delay <code>optimizeScrollStepDelayMs</code> (mặc định 900 ms). Chỉ kết thúc khi ≥ min thẻ + chạm đáy trang + ổn định 5 vòng, hoặc timeout 150 s.</td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>scrapeCurrentPage()</code></td>
+        <td><span class="file">similar-products-scraper.js</span> — đọc thẻ SP visible trên DOM.</td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>Lọc &amp; map</td>
+        <td><code>filterByMinSold</code> (≥ <code>optimizeMinSold</code>), <code>dedupeByTitle</code>, <code>mapRowsToOptimizeSerp</code> → cột TSV gửi Gemini.</td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><code>resolveSourcePosition()</code></td>
+        <td>Tìm vị trí SP gốc (theo <code>itemId</code> hoặc so khớp tiêu đề form) trên trang 1.</td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><code>setOptimizeCrawlActive(false)</code></td>
+        <td>Kết thúc crawl keyword (trong <code>finally</code>).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Navigate từ Service Worker</h3>
+  <p><code>navigateSearchTabToKeyword()</code> trong SW:</p>
+  <ol>
+    <li><code>chrome.tabs.update</code> → URL <code>https://shopee.vn/search?keyword=…</code></li>
+    <li><code>waitForTabComplete</code> (tối đa 35 s)</li>
+    <li>Sleep ≥ max(<code>navigateDelayMs</code>, 4000 ms)</li>
+    <li><code>ensureTabReady</code> — ping content script Shopee</li>
+    <li>Sleep thêm 1500 ms</li>
+  </ol>
+
+  <h3>Cột dữ liệu đối thủ (TSV → Gemini)</h3>
+  <p>File: <span class="file">src/shared/optimize-serp-columns.js</span></p>
+  <table>
+    <thead><tr><th>Cột</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td>Từ khóa</td><td>Keyword đang crawl</td></tr>
+      <tr><td># trang 1</td><td>Thứ hạng trên lưới kết quả</td></tr>
+      <tr><td>Tên đầy đủ</td><td>Tiêu đề sản phẩm đối thủ</td></tr>
+      <tr><td>Đoạn hiện lưới</td><td>Phần tiêu đề hiển thị trên card</td></tr>
+      <tr><td>Số ký tự lưới</td><td>Độ dài đoạn hiện trên lưới</td></tr>
+      <tr><td>Giá KM</td><td>Giá khuyến mãi text</td></tr>
+      <tr><td>Đã bán</td><td>Lượt bán (lọc theo min sold)</td></tr>
+    </tbody>
+  </table>
+  <p class="meta">Không gửi URL, rating, % giảm giá vào prompt phân tích.</p>
+
+  <!-- ========== GEMINI ========== -->
+  <h2 id="gemini">5. Tương tác Gemini (2 lần)</h2>
+
+  <table>
+    <thead>
+      <tr><th>Lần</th><th>Schema</th><th>Parser</th><th>Timeout chờ</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Keywords</td>
+        <td><code>{"keywords":["…"]}</code></td>
+        <td><code>parseGeminiKeywordsJson</code></td>
+        <td><code>response-tracker.js</code> poll 1 s/lần; cần JSON hợp lệ + stream ổn định</td>
+      </tr>
+      <tr>
+        <td>Product</td>
+        <td><code>{"title":"…","description":"…"}</code></td>
+        <td><code>parseGeminiProductJson</code></td>
+        <td>Cùng cơ chế; quét tất cả bubble model, không chặn bởi hash cũ</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Luồng content Gemini (<span class="file">src/content/gemini/automation.js</span> + <span class="file">index.js</span>):</p>
+  <ol>
+    <li>Nhận <code>GEMINI_SEND_PROMPT</code> với <code>prompt</code>, <code>requestId</code>, <code>expectedSchema</code>.</li>
+    <li>Chụp snapshot bubble trước khi Send.</li>
+    <li>Điền textarea/input Gemini, click nút Send.</li>
+    <li><code>waitForGeminiResponse()</code> — đợi bubble mới có JSON parse được.</li>
+    <li>Trả <code>{ text, ok }</code> về SW.</li>
+  </ol>
+
+  <!-- ========== MESSAGES ========== -->
+  <h2 id="messages">6. Bảng message Chrome</h2>
+  <p>Định nghĩa: <span class="file">src/shared/messaging.js</span></p>
+
+  <table>
+    <thead>
+      <tr><th>Message</th><th>Hướng</th><th>Vai trò</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>OPTIMIZE_PRODUCT</code></td><td>Content seller → SW</td><td>Bắt đầu pipeline</td></tr>
+      <tr><td><code>OPTIMIZE_PROGRESS</code></td><td>SW → Content seller</td><td>Cập nhật overlay (text, captcha, done, error)</td></tr>
+      <tr><td><code>OPTIMIZE_CANCEL</code></td><td>Content → SW (+ broadcast Shopee)</td><td>Hủy pipeline + abort crawl</td></tr>
+      <tr><td><code>OPTIMIZE_RESUME</code></td><td>Content → SW</td><td>Tiếp tục sau CAPTCHA</td></tr>
+      <tr><td><code>SHOPEE_SEARCH_CRAWL</code></td><td>SW → Content shopee.vn</td><td>Crawl một keyword</td></tr>
+      <tr><td><code>GEMINI_SEND_PROMPT</code></td><td>SW → Content Gemini</td><td>Gửi prompt + đợi JSON</td></tr>
+      <tr><td><code>APPLY_PRODUCT</code></td><td>SW → Content seller</td><td>Điền title/description vào form</td></tr>
+      <tr><td><code>PING</code></td><td>SW ↔ Content</td><td>Kiểm tra content script sẵn sàng (<code>ensureTabReady</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ========== FILES ========== -->
+  <h2 id="files">7. File mã nguồn liên quan</h2>
+
+  <table>
+    <thead><tr><th>File</th><th>Chức năng</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/background/service-worker.js</code></td><td>Orchestrator: <code>handleOptimizeProduct</code>, navigate tab, vòng lặp keyword</td></tr>
+      <tr><td><code>src/background/tab-messenger.js</code></td><td><code>ensureTabReady</code>, inject loader nếu cần</td></tr>
+      <tr><td><code>src/content/shared/panel.js</code></td><td>Nút «Tự động tối ưu», gửi payload, Hủy/Tiếp tục</td></tr>
+      <tr><td><code>src/content/shared/optimize-progress.js</code></td><td>Overlay tiến trình</td></tr>
+      <tr><td><code>src/content/shopee/search-crawl-runner.js</code></td><td>Crawl SERP, CAPTCHA, timing</td></tr>
+      <tr><td><code>src/content/shopee/similar-products-scraper.js</code></td><td>Parse thẻ SP từ DOM</td></tr>
+      <tr><td><code>src/content/shopee/similar-products-research.js</code></td><td><code>setOptimizeCrawlActive</code> — tránh side-effect khi crawl</td></tr>
+      <tr><td><code>src/content/shopee/adapter.js</code></td><td>Đọc/ghi form Shopee Seller + <code>extractIds</code></td></tr>
+      <tr><td><code>src/content/bigseller/adapter.js</code></td><td>Tương tự cho BigSeller</td></tr>
+      <tr><td><code>src/content/gemini/response-tracker.js</code></td><td>Đợi phản hồi Gemini JSON</td></tr>
+      <tr><td><code>src/shared/optimize-prompts.js</code></td><td>Prompt keyword + phân tích, build TSV block</td></tr>
+      <tr><td><code>src/shared/optimize-serp-columns.js</code></td><td>Cột TSV đối thủ</td></tr>
+      <tr><td><code>src/shared/gemini-json.js</code></td><td>Parse JSON keywords / product</td></tr>
+      <tr><td><code>src/shared/storage.js</code></td><td>Settings mặc định pipeline</td></tr>
+      <tr><td><code>src/options/index.html</code>, <code>options.js</code></td><td>UI cài đặt pipeline</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ========== SETTINGS ========== -->
+  <h2 id="settings">8. Cài đặt pipeline</h2>
+  <p>Trang Options extension → mục <strong>Tự động tối ưu SEO</strong>. Lưu trong <code>chrome.storage.sync</code>.</p>
+
+  <table>
+    <thead><tr><th>Setting</th><th>Mặc định</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>optimizeMaxKeywords</code></td><td>8</td><td>Số từ khóa tối đa sau Gemini bước 1</td></tr>
+      <tr><td><code>optimizeMinSold</code></td><td>1</td><td>Lọc đối thủ — đã bán tối thiểu</td></tr>
+      <tr><td><code>optimizeNavigateDelayMs</code></td><td>4000</td><td>Chờ sau khi tab search load xong (sàn tối thiểu 3000)</td></tr>
+      <tr><td><code>optimizeScrollStepDelayMs</code></td><td>900</td><td>Delay mỗi bước scroll khi crawl</td></tr>
+      <tr><td><code>optimizeBetweenKeywordDelayMs</code></td><td>3500</td><td>Nghỉ giữa hai từ khóa (sàn 2000)</td></tr>
+      <tr><td><code>optimizeMinProductCards</code></td><td>55</td><td>Số thẻ SP tối thiểu trên trang 1 trước khi scrape</td></tr>
+      <tr><td><code>optimizeKeywordPrompt</code></td><td>(trống)</td><td>Prompt tùy chỉnh bước 1; trống = mặc định trong code</td></tr>
+      <tr><td><code>optimizeAnalysisPrompt</code></td><td>(trống)</td><td>Prompt tùy chỉnh bước 2</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card warn">
+    <strong>Gợi ý khi trang load chậm</strong>
+    Tăng <code>optimizeNavigateDelayMs</code> lên 6000–8000 và <code>optimizeMinProductCards</code> giữ 55.
+    Setting cũ trong storage có thể vẫn là giá trị thấp — cần lưu lại trong Options sau khi cập nhật extension.
+  </div>
+
+  <!-- ========== CAPTCHA ========== -->
+  <h2 id="captcha">9. CAPTCHA &amp; Hủy / Tiếp tục</h2>
+
+  <h3>CAPTCHA</h3>
+  <ol>
+    <li>Crawl phát hiện CAPTCHA → trả <code>status: 'captcha'</code>.</li>
+    <li>SW set <code>optimizeState.waitingCaptcha = true</code>, overlay hiện nút <strong>Tiếp tục</strong>.</li>
+    <li>User giải CAPTCHA trên tab <code>shopee.vn/search</code>, bấm Tiếp tục.</li>
+    <li><code>OPTIMIZE_RESUME</code> → <code>waitForOptimizeResume()</code> resolve → crawl lại cùng keyword (không nhảy sang keyword khác).</li>
+  </ol>
+
+  <h3>Hủy</h3>
+  <ul class="compact">
+    <li>Overlay → <code>OPTIMIZE_CANCEL</code> → SW set <code>cancelled: true</code>.</li>
+    <li>Tab Shopee search nhận cancel → <code>AbortController</code> abort crawl đang chạy.</li>
+    <li>Pipeline trả lỗi «Đã hủy pipeline».</li>
+  </ul>
+
+  <!-- ========== ERRORS ========== -->
+  <h2 id="loi">10. Lỗi thường gặp</h2>
+
+  <table>
+    <thead><tr><th>Thông báo</th><th>Nguyên nhân / cách xử lý</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Pipeline chưa sẵn sàng — Reload extension</td>
+        <td>Service worker chưa đăng ký (status 15) hoặc mất kết nối. Reload trên <code>chrome://extensions</code>.</td>
+      </tr>
+      <tr>
+        <td>Gemini không trả JSON keywords/product hợp lệ</td>
+        <td>Gemini trả markdown hoặc text ngoài JSON. Thử lại; kiểm tab Gemini đang mở.</td>
+      </tr>
+      <tr>
+        <td>Không crawl được đối thủ SERP (bảng TSV trống)</td>
+        <td>CAPTCHA, DOM chưa load, hoặc selector Shopee đổi. Giải CAPTCHA, tăng delay, reload extension.</td>
+      </tr>
+      <tr>
+        <td>Chỉ thấy X/55 thẻ SP</td>
+        <td>Trang chưa tải đủ — tăng navigate delay; đợi mạng ổn định.</td>
+      </tr>
+      <tr>
+        <td>Pipeline tối ưu đang chạy</td>
+        <td>Chỉ một pipeline/lúc. Hủy run cũ hoặc đợi xong.</td>
+      </tr>
+      <tr>
+        <td>Hết thời gian pipeline (15 phút)</td>
+        <td>Quá nhiều keyword / mạng chậm / CAPTCHA lâu. Giảm <code>optimizeMaxKeywords</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="card">
+    <strong>Lưu ý CSP trên Gemini</strong>
+    Console có thể báo lỗi CSP từ <code>googleadservices.com</code> / GTM khi extension click Send — đây là noise từ trang Google, không phải lỗi extension.
+  </div>
+
+</main>
+
+<footer>
+  BigSeller AI · Tài liệu luồng Tự động tối ưu SEO · Cập nhật theo codebase hiện tại
+</footer>
+
+</body>
+</html>

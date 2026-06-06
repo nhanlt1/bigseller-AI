@@ -120,7 +120,7 @@ async function load() {
 
     if (optimizeNavigateDelayMsInput)
 
-        optimizeNavigateDelayMsInput.value = String(currentSettings.optimizeNavigateDelayMs ?? 4000);
+        optimizeNavigateDelayMsInput.value = String(currentSettings.optimizeNavigateDelayMs ?? 1000);
 
     if (optimizeScrollStepDelayMsInput)
 
@@ -128,11 +128,11 @@ async function load() {
 
     if (optimizeBetweenKeywordDelayMsInput)
 
-        optimizeBetweenKeywordDelayMsInput.value = String(currentSettings.optimizeBetweenKeywordDelayMs ?? 3500);
+        optimizeBetweenKeywordDelayMsInput.value = String(currentSettings.optimizeBetweenKeywordDelayMs ?? 2000);
 
     if (optimizeMinProductCardsInput)
 
-        optimizeMinProductCardsInput.value = String(currentSettings.optimizeMinProductCards ?? 55);
+        optimizeMinProductCardsInput.value = String(currentSettings.optimizeMinProductCards ?? 50);
 
     if (optimizeKeywordPromptInput)
 

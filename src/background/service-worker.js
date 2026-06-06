@@ -265,7 +265,7 @@ async function navigateSearchTabToKeyword(searchTabId, keyword, navigateDelayMs)
     const current = normalizeTitleKey(searchTabKeyword(tab.url));
     const onSearch = /shopee\.vn\/search/i.test(tab.url ?? '');
     if (onSearch && current === want) {
-        await sleep(Math.max(navigateDelayMs, 3000));
+        await sleep(Math.max(navigateDelayMs, 1000));
         await ensureTabReady(searchTabId, 'shopee');
         return;
     }
@@ -274,9 +274,8 @@ async function navigateSearchTabToKeyword(searchTabId, keyword, navigateDelayMs)
         active: true,
     });
     await waitForTabComplete(searchTabId, 35000);
-    await sleep(Math.max(navigateDelayMs, 4000));
+    await sleep(Math.max(navigateDelayMs, 1000));
     await ensureTabReady(searchTabId, 'shopee');
-    await sleep(1500);
 }
 
 async function sendGeminiSchemaPrompt({ prompt, requestId, title, description, expectedSchema }) {
@@ -408,7 +407,7 @@ async function handleOptimizeProduct(payload, sellerTabId) {
                     await navigateSearchTabToKeyword(
                         searchTabId,
                         keyword,
-                        Math.max(Number(settings.optimizeNavigateDelayMs) || 4000, 3000),
+                        Math.max(Number(settings.optimizeNavigateDelayMs) || 1000, 1000),
                     );
                     const response = await crawlKeywordOnSearchTab(searchTabId, {
                         ...crawlPayload,
@@ -465,8 +464,8 @@ async function handleOptimizeProduct(payload, sellerTabId) {
 
             if (i < keywords.length - 1) {
                 const betweenDelay = Math.max(
-                    Number(settings.optimizeBetweenKeywordDelayMs) || 3500,
-                    2000,
+                    Number(settings.optimizeBetweenKeywordDelayMs) || 2000,
+                    1000,
                 );
                 await sleep(betweenDelay);
             }

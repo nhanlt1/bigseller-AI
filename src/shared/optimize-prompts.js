@@ -2,6 +2,8 @@ import { rowsToTsv } from "./table-export.js";
 import { OPTIMIZE_SERP_COLUMNS } from "./optimize-serp-columns.js";
 import {
   REWRITE_JSON_OUTPUT_RULES,
+  SHOPEE_DESCRIPTION_MAX_LENGTH,
+  SHOPEE_TITLE_MAX_LENGTH,
   SHOP_NAME_PROMPT_BLOCK,
 } from "./storage.js";
 
@@ -50,8 +52,10 @@ Mô tả gốc:
 === YÊU CẦU ===
 - Học cách đặt từ khóa ở đoạn đầu tiêu đề từ đối thủ có lượt bán tốt; không copy y nguyên.
 - Nếu SP gốc «không thấy» trên SERP trang 1 — vẫn tối ưu dựa trên đối thủ và nội dung gốc.
-- Tiêu đề ≤120 ký tự; mô tả ≤3000 ký tự; được dùng dấu / khi hợp lý (Combo/Bộ, A4/A5).
-- Áp dụng quy tắc tiêu đề/mô tả Shopee (từ khóa vàng, cấu trúc 4 phần mô tả, emoji trong mô tả, hashtag cuối).
+- Tiêu đề ≤${SHOPEE_TITLE_MAX_LENGTH} ký tự; mô tả ≤${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự (đếm mọi ký tự, KHÔNG theo số từ). Mục tiêu mô tả 1500–2400 ký tự.
+- Mô tả: 4 phần gọn (mở đầu / thông số bullet / hướng dẫn / cam kết + hashtag); emoji tiết kiệm; nếu dài thì rút phần 3–4 trước khi vượt ${SHOPEE_DESCRIPTION_MAX_LENGTH}.
+- Được dùng dấu / khi hợp lý (Combo/Bộ, A4/A5).
+- Áp dụng quy tắc tiêu đề/mô tả Shopee (từ khóa vàng, emoji chỉ trong mô tả, hashtag cuối).
 - Cho phép dấu / trong tiêu đề; cấm emoji trong tiêu đề; cấm Freeship/Hot/Top/Rẻ nhất.`;
 
 function fillTemplate(template, vars) {

@@ -64,6 +64,10 @@ export async function setGeminiLastResponseHash(hash) {
     /* content script / SW — bỏ qua nếu storage tạm không khả dụng */
   }
 }
+/** Giới hạn Shopee Seller — dùng trong prompt và cắt đầu ra Gemini */
+export const SHOPEE_TITLE_MAX_LENGTH = 120;
+export const SHOPEE_DESCRIPTION_MAX_LENGTH = 3000;
+
 /** Luôn ghép vào cuối prompt gửi Gemini — bắt buộc đầu ra JSON để extension trích xuất */
 export const REWRITE_JSON_OUTPUT_RULES = `---
 ĐẦU RA BẮT BUỘC (chỉ JSON, không markdown, không giải thích trước/sau):
@@ -72,8 +76,10 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 - Bước 1 (tìm từ khóa vàng, nỗi đau, danh sách cụm từ): chỉ làm nội bộ trước khi viết — KHÔNG ghi các bước đó, bảng phân tích, hay danh sách từ khóa vàng vào JSON hay trước/sau JSON.
 - Schema:
   {"title": string, "description": string}
-- title: tối đa 120 ký tự.
-- description: tối đa 3000 ký tự; xuống dòng trong chuỗi dùng \\n.
+- title: TỐI ĐA ${SHOPEE_TITLE_MAX_LENGTH} ký tự (đếm mọi ký tự). Mục tiêu 80–120 ký tự.
+- description: TỐI ĐA ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự (đếm mọi ký tự: chữ, số, emoji, xuống dòng \\n, hashtag, dấu cách). Mục tiêu 1500–2400 ký tự — KHÔNG viết theo số từ.
+- TRƯỚC KHI TRẢ JSON: tự đếm length(description). Nếu > ${SHOPEE_DESCRIPTION_MAX_LENGTH} thì BẮT BUỘC rút gọn (gộp bullet, bỏ câu phụ, giữ 4 phần cốt lõi) cho đến khi ≤ ${SHOPEE_DESCRIPTION_MAX_LENGTH}. JSON lỗi nếu vượt giới hạn.
+- xuống dòng trong chuỗi description dùng \\n.
 - Không dùng dấu nháy kép \`"\` bên trong title/description (dùng nháy đơn thay thế); mọi \`"\` trong chuỗi phải escape thành \`\\"\`.
 - Ví dụ: {"title":"Áo thun nam form rộng","description":"Chất cotton co giãn...\\nSize S-XL"}`;
 
@@ -87,7 +93,8 @@ Tiêu đề được phép dùng dấu / (vd Combo/Bộ, A4/A5) — không loạ
   }
   if (scope === "description") {
     return `=== PHẠM VI YÊU CẦU ===
-Chỉ viết lại MÔ TẢ Shopee. KHÔNG sửa tiêu đề — trường title trong JSON phải giữ nguyên y hệt "Tiêu đề gốc" bên dưới.`;
+Chỉ viết lại MÔ TẢ Shopee. KHÔNG sửa tiêu đề — trường title trong JSON phải giữ nguyên y hệt "Tiêu đề gốc" bên dưới.
+Mô tả mới TỐI ĐA ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự — ưu tiên ngắn gọn, súc tích; không nhồi thêm đoạn dài chỉ để đủ ý.`;
   }
   return `=== PHẠM VI YÊU CẦU ===
 Viết lại cả TIÊU ĐỀ và MÔ TẢ Shopee.`;
@@ -166,19 +173,16 @@ Công thức: [Từ khóa vàng] + [Loại SP] + [Đặc tính kỹ thuật] + [
 - Cấm emoji và ký tự đặc biệt: # @ $ % ^ * < > ! (không cấm dấu /).
 - Cấm cụm khuyến mãi: Freeship, Giảm giá, Bán chạy, Hot, Top, Rẻ nhất; không nhồi từ khóa lạ.
 
-=== MÔ TẢ SHOPEE (tối đa 3000 ký tự, text thuần) ===
-Cấu trúc 4 phần, xuống dòng rõ (dùng \\n trong JSON):
-1) Mở đầu ngắn: nêu nỗi đau khách hàng + cách sản phẩm giải quyết; lồng từ khóa vàng (bước 1); nhắc tên gian hàng {shopName} nếu có.
-2) Thông số: chất liệu, kích thước, xuất xứ, màu/size, hạn dùng… (bullet "- ").
-3) Hướng dẫn dùng + bảo quản.
-4) Cam kết/bảo hành/đổi trả (chỉ nếu bản gốc có): viết lại, chỉ nhắc {shopName}, không giữ tên shop cũ.
-- Emoji (chỉ trong mô tả, không dùng trong tiêu đề): thêm emoji phù hợp ngành hàng để dễ đọc trên điện thoại.
-  • Đặt 1 emoji đầu mỗi phần / tiêu đề nhóm (vd ✨ mở đầu, 📋 thông số, 📖 hướng dẫn, 🛡️ cam kết).
-  • Mỗi bullet quan trọng có thể thêm 1 emoji đầu dòng (✅ lợi ích, 📦 quy cách, 🎨 màu/size, ⚠️ lưu ý, 💡 mẹo dùng).
-  • Chọn emoji đơn giản, phổ biến (✨ ✅ 📦 🎯 💡 ⚠️ 🛡️ 🎁 📏 🧼 🔋 …); tối đa ~1 emoji mỗi dòng, không spam, không thay nội dung bằng emoji.
-- Mỗi tính năng kèm lợi ích; từ khóa chính lặp 2-3 lần tự nhiên.
-- Đoạn ngắn, dễ quét trên điện thoại; ~300-800 từ nếu đủ dữ liệu.
-- Cuối mô tả: 3-5 hashtag liên quan, ví dụ #bútbi #tậpviết
+=== MÔ TẢ SHOPEE (text thuần — HARD LIMIT ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự) ===
+Cấu trúc 4 phần gọn, xuống dòng rõ (dùng \\n trong JSON). Tổng description ≤ ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự — mục tiêu 1500–2400 ký tự; KHÔNG viết theo số từ.
+1) Mở đầu (~200–350 ký tự): nỗi đau + giải pháp; từ khóa vàng; nhắc {shopName} nếu có.
+2) Thông số (~400–700 ký tự): bullet "- " ngắn — chất liệu, size, màu, xuất xứ…
+3) Hướng dẫn + bảo quản (~300–500 ký tự).
+4) Cam kết (~150–300 ký tự, nếu bản gốc có): chỉ nhắc {shopName}.
+- Emoji (chỉ mô tả): tối đa 1 emoji đầu mỗi phần + đầu bullet quan trọng; không spam.
+- Từ khóa chính lặp 2–3 lần tự nhiên; đoạn ngắn, dễ quét trên điện thoại.
+- Cuối mô tả: 3–5 hashtag (tính vào ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự).
+- Nếu sắp vượt ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự: cắt bớt phần 3–4 trước, không kéo dài mở đầu.
 
 Tiêu đề gốc:
 {title}
@@ -217,11 +221,11 @@ export const DEFAULT_SETTINGS = {
   /** Prompt tùy chỉnh — để trống dùng mặc định trong optimize-prompts.js */
   optimizeKeywordPrompt: "",
   optimizeAnalysisPrompt: "",
-  optimizeNavigateDelayMs: 4000,
+  optimizeNavigateDelayMs: 1000,
   optimizeScrollStepDelayMs: 900,
-  optimizeBetweenKeywordDelayMs: 3500,
-  /** Chờ đủ thẻ SP trang 1 trước khi scrape (Shopee ~60 SP/trang) */
-  optimizeMinProductCards: 55,
+  optimizeBetweenKeywordDelayMs: 2000,
+  /** Mục tiêu SP trang 1 — đủ thì bỏ qua lần End/PageUp thứ hai */
+  optimizeMinProductCards: 50,
   pricingFormula: DEFAULT_PRICING_FORMULA,
   pricingVariables: { ...DEFAULT_PRICING_VARIABLES },
   pricingCalculator: {

@@ -2,6 +2,11 @@
  * Tên gian hàng theo shop Shopee (subaccount) / BigSeller (select cửa hàng).
  */
 
+import {
+  SHOPEE_DESCRIPTION_MAX_LENGTH,
+  SHOPEE_TITLE_MAX_LENGTH,
+} from "./storage.js";
+
 /** Shopee: class subaccount-name — id → tên thương hiệu trong mô tả */
 export const SHOPEE_SHOP_ID_TO_BRAND = {
   hangtieudung02: "NPP VĂN PHÒNG PHẨM THIÊN TRANG",
@@ -214,16 +219,28 @@ export function ensureShopNameInCommitment(text, shopName) {
   );
 }
 
-/** Làm sạch title/description sau Gemini: gỡ shop lạ, giữ đúng shopName. */
+/** Cắt về max ký tự — ưu tiên cắt tại xuống dòng gần cuối. */
+export function truncateShopeeField(text, maxLength) {
+  const s = String(text ?? "").trim();
+  if (s.length <= maxLength) return s;
+  const cut = s.slice(0, maxLength);
+  const lastNl = cut.lastIndexOf("\n");
+  if (lastNl > maxLength * 0.8) return cut.slice(0, lastNl).trimEnd();
+  return cut.trimEnd();
+}
+
+/** Làm sạch title/description sau Gemini: gỡ shop lạ, giữ đúng shopName, cắt giới hạn Shopee. */
 export function sanitizeRewrittenProduct(product, shopName = "") {
   const allowed = shopName?.trim() ?? "";
-  const title = stripShopNamesFromText(product.title ?? "", {
-    allowedShopName: allowed,
-  });
+  const title = truncateShopeeField(
+    stripShopNamesFromText(product.title ?? "", { allowedShopName: allowed }),
+    SHOPEE_TITLE_MAX_LENGTH,
+  );
   let description = stripShopNamesFromText(product.description ?? "", {
     allowedShopName: allowed,
   });
   if (allowed) description = ensureShopNameInCommitment(description, allowed);
+  description = truncateShopeeField(description, SHOPEE_DESCRIPTION_MAX_LENGTH);
   return { title, description };
 }
 
