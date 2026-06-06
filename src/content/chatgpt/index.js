@@ -1,10 +1,12 @@
 import { MessageType, replyAsync, safeSendResponse } from '../../shared/messaging.js';
 import { fillChatGPTComposer } from './composer.js';
+
 const CHATGPT_SCRIPT_FLAG = '__bigsellerAiChatgptScript';
 if (!globalThis[CHATGPT_SCRIPT_FLAG]) {
     globalThis[CHATGPT_SCRIPT_FLAG] = true;
     registerChatGPTMessageListener();
 }
+
 function registerChatGPTMessageListener() {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (message.type === MessageType.CHATGPT_PING) {
@@ -21,8 +23,15 @@ function registerChatGPTMessageListener() {
             return false;
         }
         return replyAsync(sendResponse, async () => {
-            await fillChatGPTComposer(prompt);
-            return { ok: true };
+            const result = await fillChatGPTComposer(prompt, {
+                imageBase64: payload?.imageBase64,
+                imageMimeType: payload?.imageMimeType,
+            });
+            return {
+                ok: true,
+                imageAttached: result.imageAttached === true,
+                uploadUiOpened: result.uploadUiOpened === true,
+            };
         });
     });
 }

@@ -7,7 +7,7 @@ export const PRODUCT_FIELD_ELEMENTS = [
         key: 'title',
         label: 'Tên sản phẩm',
         maxLength: 120,
-        inputNotes: 'Tối đa 120 ký tự',
+        inputNotes: `Tối thiểu 25, khuyến nghị ≤100, tối đa 120 ký tự`,
         bigseller: {
             platform: 'bigseller',
             selectors: [

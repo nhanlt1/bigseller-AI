@@ -396,6 +396,7 @@ async function handleOptimizeProduct(payload, sellerTabId) {
                 const crawlPayload = {
                     keyword,
                     minSold: settings.optimizeMinSold,
+                    maxCompetitors: settings.optimizeMaxCompetitorsPerKeyword,
                     sourceItemId: product.itemId,
                     sourceTitle: product.title,
                     navigateDelayMs: settings.optimizeNavigateDelayMs,
@@ -594,7 +595,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
         }
         return replyAsync(sendResponse, () => withServiceWorkerKeepalive(async () => {
-            await openChatGPTWithImagePrompt(prompt.trim());
+            await openChatGPTWithImagePrompt(
+                prompt.trim(),
+                message.payload?.imageUrl,
+            );
             return { ok: true };
         }));
     }

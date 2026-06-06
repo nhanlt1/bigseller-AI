@@ -65,6 +65,10 @@ export async function setGeminiLastResponseHash(hash) {
   }
 }
 /** Giới hạn Shopee Seller — dùng trong prompt và cắt đầu ra Gemini */
+export const SHOPEE_TITLE_MIN_LENGTH = 25;
+/** Mục tiêu SEO / hiển thị lưới — Gemini nên nằm trong khoảng min–target */
+export const SHOPEE_TITLE_TARGET_MAX_LENGTH = 100;
+/** Trần form Shopee Seller */
 export const SHOPEE_TITLE_MAX_LENGTH = 120;
 export const SHOPEE_DESCRIPTION_MAX_LENGTH = 3000;
 
@@ -76,7 +80,8 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 - Bước 1 (tìm từ khóa vàng, nỗi đau, danh sách cụm từ): chỉ làm nội bộ trước khi viết — KHÔNG ghi các bước đó, bảng phân tích, hay danh sách từ khóa vàng vào JSON hay trước/sau JSON.
 - Schema:
   {"title": string, "description": string}
-- title: TỐI ĐA ${SHOPEE_TITLE_MAX_LENGTH} ký tự (đếm mọi ký tự). Mục tiêu 80–120 ký tự.
+- title: ${SHOPEE_TITLE_MIN_LENGTH}–${SHOPEE_TITLE_TARGET_MAX_LENGTH} ký tự (đếm mọi ký tự). BẮT BUỘC ≥${SHOPEE_TITLE_MIN_LENGTH}; mục tiêu ${SHOPEE_TITLE_MIN_LENGTH}–${SHOPEE_TITLE_TARGET_MAX_LENGTH}; tối đa tuyệt đối ${SHOPEE_TITLE_MAX_LENGTH}.
+- TRƯỚC KHI TRẢ JSON: đếm length(title). Nếu < ${SHOPEE_TITLE_MIN_LENGTH} thì bổ sung từ khóa/đặc tính hợp lý cho đủ ≥${SHOPEE_TITLE_MIN_LENGTH}. Nếu > ${SHOPEE_TITLE_TARGET_MAX_LENGTH} thì rút gọn ≤${SHOPEE_TITLE_TARGET_MAX_LENGTH} (không vượt ${SHOPEE_TITLE_MAX_LENGTH}).
 - description: TỐI ĐA ${SHOPEE_DESCRIPTION_MAX_LENGTH} ký tự (đếm mọi ký tự: chữ, số, emoji, xuống dòng \\n, hashtag, dấu cách). Mục tiêu 1500–2400 ký tự — KHÔNG viết theo số từ.
 - TRƯỚC KHI TRẢ JSON: tự đếm length(description). Nếu > ${SHOPEE_DESCRIPTION_MAX_LENGTH} thì BẮT BUỘC rút gọn (gộp bullet, bỏ câu phụ, giữ 4 phần cốt lõi) cho đến khi ≤ ${SHOPEE_DESCRIPTION_MAX_LENGTH}. JSON lỗi nếu vượt giới hạn.
 - xuống dòng trong chuỗi description dùng \\n.
@@ -163,11 +168,11 @@ Làm bước này trong suy nghĩ — chỉ đưa kết quả (từ khóa đã c
 3) Chọn 2-4 từ khóa vàng mạnh nhất; PHẢI đưa vào tiêu đề (ưu tiên đoạn đầu, dễ đọc trên lưới) và mở đầu mô tả. Không thay bằng từ chung chung (chất lượng, cao cấp, giá rẻ).
 4) Chỉ dùng từ khóa vàng đúng với sản phẩm — không bịa nỗi đau không có trong bản gốc/ngành hàng.
 
-=== TIÊU ĐỀ SHOPEE (tối đa 120 ký tự) ===
+=== TIÊU ĐỀ SHOPEE (${SHOPEE_TITLE_MIN_LENGTH}–${SHOPEE_TITLE_TARGET_MAX_LENGTH} ký tự) ===
 Công thức: [Từ khóa vàng] + [Loại SP] + [Đặc tính kỹ thuật] + [Thương hiệu/Model] — ưu tiên dễ đọc, dễ hiểu.
 - Ví dụ: Bút Bi Bấm Có Đệm Tay Chống Mỏi Thiên Long TL-095 Ngòi 0.5mm.
 - Từ khóa vàng + mã/model đặt sớm trong tiêu đề để khách nhận ra ngay loại sản phẩm.
-- Dài khuyến nghị 80-120 ký tự, viết hoa chữ cái đầu (không IN HOA cả dòng).
+- Dài bắt buộc ${SHOPEE_TITLE_MIN_LENGTH}–${SHOPEE_TITLE_TARGET_MAX_LENGTH} ký tự (tối thiểu ${SHOPEE_TITLE_MIN_LENGTH}, không vượt ${SHOPEE_TITLE_TARGET_MAX_LENGTH}; trần form ${SHOPEE_TITLE_MAX_LENGTH}), viết hoa chữ cái đầu (không IN HOA cả dòng).
 - Khớp ảnh sản phẩm; ghi rõ Combo/Bộ nếu là set.
 - Cho phép dấu / trong tiêu đề khi tách cụm (vd Combo/Bộ, khổ A4/A5, Thương hiệu/Model) — giữ nếu tiêu đề gốc hoặc ngành hàng thường dùng; không thay / bằng dấu cách hoặc gạch ngang một cách tùy tiện.
 - Cấm emoji và ký tự đặc biệt: # @ $ % ^ * < > ! (không cấm dấu /).
@@ -216,8 +221,10 @@ export const DEFAULT_SETTINGS = {
   language: "Việt",
   /** Pipeline tối ưu SEO — số từ khóa tối đa sau Gemini bước 1 */
   optimizeMaxKeywords: 8,
-  /** Lọc đối thủ SERP: soldNumeric tối thiểu */
-  optimizeMinSold: 1,
+  /** Lọc đối thủ SERP: soldNumeric tối thiểu (vd 10k+ → 10000) */
+  optimizeMinSold: 1000,
+  /** Sau lọc — giữ tối đa N đối thủ bán chạy nhất / từ khóa (sort theo sold) */
+  optimizeMaxCompetitorsPerKeyword: 15,
   /** Prompt tùy chỉnh — để trống dùng mặc định trong optimize-prompts.js */
   optimizeKeywordPrompt: "",
   optimizeAnalysisPrompt: "",
@@ -323,6 +330,9 @@ function mergeStoredSettings(stored) {
       stored?.optimizeMaxKeywords ?? DEFAULT_SETTINGS.optimizeMaxKeywords,
     optimizeMinSold:
       stored?.optimizeMinSold ?? DEFAULT_SETTINGS.optimizeMinSold,
+    optimizeMaxCompetitorsPerKeyword:
+      stored?.optimizeMaxCompetitorsPerKeyword ??
+      DEFAULT_SETTINGS.optimizeMaxCompetitorsPerKeyword,
     optimizeNavigateDelayMs:
       stored?.optimizeNavigateDelayMs ??
       DEFAULT_SETTINGS.optimizeNavigateDelayMs,

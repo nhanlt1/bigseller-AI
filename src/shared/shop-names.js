@@ -4,7 +4,7 @@
 
 import {
   SHOPEE_DESCRIPTION_MAX_LENGTH,
-  SHOPEE_TITLE_MAX_LENGTH,
+  SHOPEE_TITLE_TARGET_MAX_LENGTH,
 } from "./storage.js";
 
 /** Shopee: class subaccount-name — id → tên thương hiệu trong mô tả */
@@ -234,7 +234,7 @@ export function sanitizeRewrittenProduct(product, shopName = "") {
   const allowed = shopName?.trim() ?? "";
   const title = truncateShopeeField(
     stripShopNamesFromText(product.title ?? "", { allowedShopName: allowed }),
-    SHOPEE_TITLE_MAX_LENGTH,
+    SHOPEE_TITLE_TARGET_MAX_LENGTH,
   );
   let description = stripShopNamesFromText(product.description ?? "", {
     allowedShopName: allowed,

@@ -220,9 +220,15 @@ function filterByMinSold(rows, minSold) {
   if (threshold <= 0) return rows;
   return rows.filter((row) => {
     const sold = Number(row.soldNumeric);
-    if (!Number.isFinite(sold)) return true;
+    if (!Number.isFinite(sold)) return false;
     return sold >= threshold;
   });
+}
+
+function limitTopBySold(rows, max) {
+  const cap = Number(max);
+  if (!Number.isFinite(cap) || cap <= 0) return rows;
+  return rows.slice(0, cap);
 }
 
 function sortBySoldDesc(rows) {
@@ -267,6 +273,7 @@ function resolveSourcePosition(tableRows, { sourceItemId, sourceTitle }) {
  * @param {{
  *   keyword: string,
  *   minSold?: number,
+ *   maxCompetitors?: number,
  *   sourceItemId?: string,
  *   sourceTitle?: string,
  *   navigateDelayMs?: number,
@@ -285,7 +292,9 @@ export async function crawlKeywordSearch(opts) {
     opts.navigateDelayMs ?? settings.optimizeNavigateDelayMs ?? KEYWORD_SETTLE_MS,
     KEYWORD_SETTLE_MS,
   );
-  const minSold = opts.minSold ?? settings.optimizeMinSold ?? 1;
+  const minSold = opts.minSold ?? settings.optimizeMinSold ?? 1000;
+  const maxCompetitors =
+    opts.maxCompetitors ?? settings.optimizeMaxCompetitorsPerKeyword ?? 15;
   const signal = opts.signal;
 
   setOptimizeCrawlActive(true);
@@ -319,7 +328,8 @@ export async function crawlKeywordSearch(opts) {
       sourceTitle: opts.sourceTitle,
     });
     const bySold = sortBySoldDesc(deduped);
-    const competitors = mapRowsToOptimizeSerp(bySold, keyword);
+    const top = limitTopBySold(bySold, maxCompetitors);
+    const competitors = mapRowsToOptimizeSerp(top, keyword);
 
     return {
       status: "ok",
@@ -341,6 +351,7 @@ export async function handleShopeeSearchCrawl(payload, signal) {
   return crawlKeywordSearch({
     keyword: payload?.keyword,
     minSold: payload?.minSold,
+    maxCompetitors: payload?.maxCompetitors,
     sourceItemId: payload?.sourceItemId,
     sourceTitle: payload?.sourceTitle,
     navigateDelayMs: payload?.navigateDelayMs,

@@ -24,6 +24,8 @@ const optimizeMaxKeywordsInput = document.getElementById('optimizeMaxKeywords');
 
 const optimizeMinSoldInput = document.getElementById('optimizeMinSold');
 
+const optimizeMaxCompetitorsPerKeywordInput = document.getElementById('optimizeMaxCompetitorsPerKeyword');
+
 const optimizeNavigateDelayMsInput = document.getElementById('optimizeNavigateDelayMs');
 
 const optimizeScrollStepDelayMsInput = document.getElementById('optimizeScrollStepDelayMs');
@@ -116,7 +118,14 @@ async function load() {
 
     if (optimizeMinSoldInput)
 
-        optimizeMinSoldInput.value = String(currentSettings.optimizeMinSold ?? 1);
+        optimizeMinSoldInput.value = String(currentSettings.optimizeMinSold ?? DEFAULT_SETTINGS.optimizeMinSold);
+
+    if (optimizeMaxCompetitorsPerKeywordInput)
+
+        optimizeMaxCompetitorsPerKeywordInput.value = String(
+            currentSettings.optimizeMaxCompetitorsPerKeyword ??
+                DEFAULT_SETTINGS.optimizeMaxCompetitorsPerKeyword,
+        );
 
     if (optimizeNavigateDelayMsInput)
 
@@ -169,6 +178,10 @@ form.addEventListener('submit', async (e) => {
             optimizeMaxKeywords: Number(optimizeMaxKeywordsInput?.value) || DEFAULT_SETTINGS.optimizeMaxKeywords,
 
             optimizeMinSold: Number(optimizeMinSoldInput?.value) || 0,
+
+            optimizeMaxCompetitorsPerKeyword:
+                Number(optimizeMaxCompetitorsPerKeywordInput?.value) ||
+                DEFAULT_SETTINGS.optimizeMaxCompetitorsPerKeyword,
 
             optimizeNavigateDelayMs: Number(optimizeNavigateDelayMsInput?.value) || DEFAULT_SETTINGS.optimizeNavigateDelayMs,
 

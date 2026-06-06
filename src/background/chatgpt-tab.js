@@ -1,4 +1,5 @@
 import { MessageType, sendTabMessage } from '../shared/messaging.js';
+import { fetchImageAsBase64 } from '../shared/image-fetch.js';
 export const CHATGPT_HOME = 'https://chatgpt.com/';
 const CHATGPT_TAB_URL_PATTERNS = [
     'https://chatgpt.com/*',
@@ -85,10 +86,22 @@ export async function ensureChatGPTContentScript(tabId) {
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
-export async function sendChatGPTImagePrompt(tabId, prompt) {
+export async function sendChatGPTImagePrompt(tabId, prompt, imageUrl) {
+    let imageBase64;
+    let imageMimeType;
+    const url = String(imageUrl ?? '').trim();
+    if (url) {
+        try {
+            const fetched = await fetchImageAsBase64(url);
+            imageBase64 = fetched.base64;
+            imageMimeType = fetched.mimeType;
+        } catch {
+            /* vẫn điền prompt + mở picker thủ công */
+        }
+    }
     const message = {
         type: MessageType.CHATGPT_FILL_IMAGE_PROMPT,
-        payload: { prompt },
+        payload: { prompt, imageBase64, imageMimeType },
     };
     let lastError = 'Content script ChatGPT chưa sẵn sàng';
     let injected = false;
@@ -108,20 +121,23 @@ export async function sendChatGPTImagePrompt(tabId, prompt) {
             if (res?.ok)
                 return;
             lastError = res?.error ?? lastError;
+            if (res && res.ok === false)
+                break;
         }
         catch (err) {
             lastError = err instanceof Error ? err.message : String(err);
-            if (isNoReceiverError(err))
-                injected = false;
+            if (!isNoReceiverError(err))
+                throw err;
+            injected = false;
         }
         await sleep(500);
     }
     throw new Error(`${lastError}. Hãy mở https://chatgpt.com, F5 trang rồi bấm tạo ảnh lại.`);
 }
-export async function openChatGPTWithImagePrompt(prompt) {
+export async function openChatGPTWithImagePrompt(prompt, imageUrl) {
     const tabId = await getOrCreateChatGPTTab();
     await waitForTabComplete(tabId);
     await sleep(800);
-    await sendChatGPTImagePrompt(tabId, prompt);
+    await sendChatGPTImagePrompt(tabId, prompt, imageUrl);
 }
 export { isNoReceiverError };
