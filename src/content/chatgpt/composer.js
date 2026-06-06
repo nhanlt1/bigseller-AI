@@ -45,6 +45,15 @@ const ATTACHMENT_SELECTORS = [
     '[data-testid="composer"] img[src^="blob:"]',
 ];
 
+const SEND_BUTTON_SELECTORS = [
+    'button[data-testid="send-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label*="Send prompt"]',
+    'button[aria-label*="Send"]',
+    'button[aria-label*="Gửi"]',
+    'button[data-testid="composer-send-button"]',
+];
+
 /**
  * @param {string} prompt
  * @param {{ images?: { base64?: string, mimeType?: string }[], imageUrls?: string[], imageBase64?: string, imageMimeType?: string }} [opts]
@@ -72,16 +81,26 @@ export async function fillChatGPTComposer(prompt, opts = {}) {
         uploadUiOpened = await openComposerUploadUi(editable);
     }
 
-    dismissChatGPTOverlays();
-    await sleep(200);
-    setComposerText(editable, prompt);
-    dismissChatGPTOverlays();
+    let submitted = false;
+    if (!uploadUiOpened) {
+        const composerRoot = findComposerRoot(editable);
+        if (imagesAttached > 0) {
+            await waitForAttachmentsReady(composerRoot, imagesAttached);
+        }
+        dismissChatGPTOverlays();
+        await sleep(200);
+        setComposerText(editable, prompt);
+        dismissChatGPTOverlays();
+        await sleep(300);
+        submitted = await submitChatGPTComposer(editable);
+    }
 
     return {
         editor: editable,
         imageAttached: imagesAttached > 0,
         imagesAttached,
         uploadUiOpened,
+        submitted,
         expectedImages: files.length,
     };
 }
@@ -243,6 +262,73 @@ async function waitForMoreAttachments(root, before, timeoutMs = 5000) {
         await sleep(150);
     }
     return countComposerAttachments(root) > before;
+}
+
+/** Chờ đủ số ảnh đính kèm và blob preview load xong trước khi gửi. */
+async function waitForAttachmentsReady(root, minCount, timeoutMs = 10000) {
+    if (minCount <= 0)
+        return true;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const count = countComposerAttachments(root);
+        if (count >= minCount && attachmentsLookReady(root))
+            return true;
+        await sleep(180);
+    }
+    return countComposerAttachments(root) >= minCount;
+}
+
+function attachmentsLookReady(root) {
+    const scope = root instanceof Element ? root : document;
+    const imgs = scope.querySelectorAll(
+        'form.group\\/composer img[src^="blob:"], [data-testid="composer"] img[src^="blob:"], img[src^="blob:"]',
+    );
+    if (imgs.length === 0)
+        return true;
+    for (const img of imgs) {
+        if (!(img instanceof HTMLImageElement))
+            continue;
+        if (!img.complete || img.naturalWidth === 0)
+            return false;
+    }
+    return true;
+}
+
+async function submitChatGPTComposer(editor) {
+    await focusComposerEditor(editor);
+    await sleep(150);
+
+    const root = findComposerRoot(editor);
+    const sendBtn = await waitForSendButton(root, 5000);
+    if (sendBtn) {
+        sendBtn.click();
+        return true;
+    }
+
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+        editor.dispatchEvent(new KeyboardEvent(type, {
+            key: 'Enter',
+            code: 'Enter',
+            keyCode: 13,
+            which: 13,
+            bubbles: true,
+            cancelable: true,
+        }));
+    }
+    return false;
+}
+
+async function waitForSendButton(root, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        for (const scope of [root, document].filter(Boolean)) {
+            const btn = queryFirst(SEND_BUTTON_SELECTORS, scope);
+            if (btn instanceof HTMLButtonElement && !btn.disabled)
+                return btn;
+        }
+        await sleep(120);
+    }
+    return null;
 }
 
 async function openComposerUploadUi(editor) {
