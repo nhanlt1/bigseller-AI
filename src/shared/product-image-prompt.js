@@ -1,6 +1,6 @@
 const IMAGE_PROMPT_HEADER = `Tạo ảnh vuông 1:1 quảng cáo sản phẩm Shopee gây ấn tượng với người mua (hình ảnh này phải nổi bật hơn so với các sản phẩm cùng loại trong lưới hiển thị).
 Lưu ý:
-- Bám sát hình ảnh sản phẩm trong ảnh đính kèm (màu sắc, hình dáng, chi tiết)
+- Bám sát hình ảnh sản phẩm trong các ảnh đính kèm (màu sắc, hình dáng, chi tiết)
 - Không chèn icon logo shopee hoặc bất kỳ sàn thương mại điện tử nào
 - Không nhồi text và badge (3-5 cái là ổn), quan trọng là sản phẩm phải nổi bật và gây ấn tượng cho người mua
 

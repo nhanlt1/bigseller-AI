@@ -23,13 +23,28 @@ function registerChatGPTMessageListener() {
             return false;
         }
         return replyAsync(sendResponse, async () => {
-            const result = await fillChatGPTComposer(prompt, {
-                imageBase64: payload?.imageBase64,
-                imageMimeType: payload?.imageMimeType,
-            });
+            /** @type {{ base64?: string, mimeType?: string }[]} */
+            let images = Array.isArray(payload?.images) ? payload.images : [];
+            if (!images.length && payload?.imageBase64) {
+                images = [{
+                    base64: payload.imageBase64,
+                    mimeType: payload.imageMimeType,
+                }];
+            }
+            const imageUrls = Array.isArray(payload?.imageUrls) ? payload.imageUrls : [];
+            const result = await fillChatGPTComposer(prompt, { images, imageUrls });
+            const expected = result.expectedImages ?? images.length ?? imageUrls.length;
+            if (expected > 0 && !result.imageAttached) {
+                return {
+                    ok: false,
+                    error: 'Đã điền prompt nhưng không đính kèm được ảnh — bấm (+) trên ChatGPT để thêm ảnh thủ công',
+                    uploadUiOpened: result.uploadUiOpened === true,
+                };
+            }
             return {
                 ok: true,
                 imageAttached: result.imageAttached === true,
+                imagesAttached: result.imagesAttached ?? 0,
                 uploadUiOpened: result.uploadUiOpened === true,
             };
         });

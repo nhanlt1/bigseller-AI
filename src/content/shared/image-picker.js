@@ -48,6 +48,7 @@ const PICKER_CSS = `
     margin-bottom: 14px;
   }
   .item {
+    position: relative;
     border: 2px solid #e5e7eb;
     border-radius: 10px;
     padding: 6px;
@@ -72,6 +73,27 @@ const PICKER_CSS = `
     margin-top: 4px;
     font-size: 10px;
     color: #6b7280;
+  }
+  .item .check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid #d1d5db;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: transparent;
+  }
+  .item[aria-selected="true"] .check {
+    background: #ee4d2d;
+    border-color: #ee4d2d;
+    color: #fff;
   }
   .actions {
     display: flex;
@@ -110,7 +132,7 @@ function ensureHost() {
       <div class="backdrop" part="backdrop"></div>
       <div class="card" role="dialog" aria-labelledby="picker-title">
         <p class="title" id="picker-title">Chọn ảnh gửi ChatGPT</p>
-        <p class="hint">Chọn ảnh sản phẩm làm tham chiếu tạo ảnh quảng cáo (1 ảnh).</p>
+        <p class="hint">Bấm chọn một hoặc nhiều ảnh sản phẩm làm tham chiếu tạo ảnh quảng cáo.</p>
         <div class="grid" id="picker-grid"></div>
         <div class="actions">
           <button type="button" class="btn" id="picker-cancel">Hủy</button>
@@ -120,23 +142,29 @@ function ensureHost() {
     document.body.appendChild(host);
 }
 
+function updateOkLabel(okBtn, count) {
+    okBtn.textContent = count > 0 ? `Tiếp tục (${count} ảnh)` : 'Tiếp tục';
+    okBtn.disabled = count === 0;
+}
+
 /**
  * @param {{ url: string, width?: number, height?: number, index?: number }[]} candidates
- * @returns {Promise<string|null>} URL đã chọn, null nếu hủy
+ * @returns {Promise<string[]|null>} URL đã chọn, null nếu hủy
  */
 export function promptProductImagePicker(candidates) {
     const list = (candidates ?? []).filter((c) => c?.url?.trim());
     if (list.length === 0)
-        return Promise.resolve('');
+        return Promise.resolve([]);
 
     ensureHost();
     return new Promise((resolve) => {
-        let selectedUrl = list[0].url;
+        /** @type {Set<string>} */
+        const selected = new Set([list[0].url]);
         const grid = shadow.getElementById('picker-grid');
         const okBtn = shadow.getElementById('picker-ok');
         const cancelBtn = shadow.getElementById('picker-cancel');
         if (!grid || !okBtn || !cancelBtn) {
-            resolve(list[0].url);
+            resolve([list[0].url]);
             return;
         }
 
@@ -145,7 +173,10 @@ export function promptProductImagePicker(candidates) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'item';
-            btn.setAttribute('aria-selected', item.url === selectedUrl ? 'true' : 'false');
+            btn.setAttribute('aria-selected', selected.has(item.url) ? 'true' : 'false');
+            const check = document.createElement('span');
+            check.className = 'check';
+            check.textContent = '✓';
             const img = document.createElement('img');
             img.src = item.url;
             img.alt = `Ảnh ${item.index ?? ''}`.trim();
@@ -157,27 +188,41 @@ export function promptProductImagePicker(candidates) {
                     ? `${item.width}×${item.height}`
                     : `Ảnh ${item.index ?? ''}`;
             label.textContent = dim;
-            btn.append(img, label);
+            btn.append(check, img, label);
             btn.addEventListener('click', () => {
-                selectedUrl = item.url;
+                if (selected.has(item.url))
+                    selected.delete(item.url);
+                else
+                    selected.add(item.url);
                 for (const el of grid.querySelectorAll('.item')) {
+                    const url = el.dataset.url ?? '';
                     el.setAttribute(
                         'aria-selected',
-                        el === btn ? 'true' : 'false',
+                        selected.has(url) ? 'true' : 'false',
                     );
                 }
+                updateOkLabel(okBtn, selected.size);
             });
+            btn.dataset.url = item.url;
             grid.appendChild(btn);
         }
+        updateOkLabel(okBtn, selected.size);
 
-        const close = (url) => {
+        const close = (urls) => {
             host?.removeAttribute('data-visible');
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             shadow.querySelector('.backdrop')?.removeEventListener('click', onCancel);
-            resolve(url);
+            resolve(urls);
         };
-        const onOk = () => close(selectedUrl);
+        const onOk = () => {
+            if (selected.size === 0)
+                return;
+            const ordered = list
+                .filter((item) => selected.has(item.url))
+                .map((item) => item.url);
+            close(ordered);
+        };
         const onCancel = () => close(null);
 
         okBtn.addEventListener('click', onOk);

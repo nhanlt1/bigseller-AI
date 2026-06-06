@@ -72,14 +72,14 @@ function sellerTabKind(url) {
         return 'bigseller';
     return null;
 }
-async function applyToSellerTab(tabId, data) {
+async function applyToSellerTab(tabId, data, scope = 'both') {
     const tab = await chrome.tabs.get(tabId);
     const kind = sellerTabKind(tab.url);
     if (!kind)
         return;
     await sendTabMessageReady(tabId, kind, {
         type: MessageType.APPLY_PRODUCT,
-        payload: data,
+        payload: { ...data, scope },
     });
     await chrome.tabs.update(tabId, { active: true });
 }
@@ -132,13 +132,13 @@ async function handleRewriteProduct(payload, senderTabId) {
             };
         }
         const merged = mergeRewriteByScope(parsed, {
-            title: payload.title,
-            description: payload.description,
+            title: payload.originalTitle ?? payload.title,
+            description: payload.originalDescription ?? payload.description,
         }, scope);
-        const data = sanitizeRewrittenProduct(merged, payload.shopName ?? '');
+        const data = sanitizeRewrittenProduct(merged, payload.shopName ?? '', scope);
         if (senderTabId != null) {
             try {
-                await applyToSellerTab(senderTabId, data);
+                await applyToSellerTab(senderTabId, data, scope);
             }
             catch {
                 /* panel vẫn hiển thị preview */
@@ -595,10 +595,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
         }
         return replyAsync(sendResponse, () => withServiceWorkerKeepalive(async () => {
-            await openChatGPTWithImagePrompt(
-                prompt.trim(),
-                message.payload?.imageUrl,
-            );
+            await openChatGPTWithImagePrompt(prompt.trim(), {
+                images: message.payload?.images,
+                imageUrls: message.payload?.imageUrls ?? message.payload?.imageUrl,
+            });
             return { ok: true };
         }));
     }

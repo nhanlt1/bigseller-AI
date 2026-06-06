@@ -92,8 +92,9 @@ export const REWRITE_JSON_OUTPUT_RULES = `---
 
 function buildRewriteScopePreamble(scope) {
   if (scope === "title") {
-    return `=== PHẠM VI YÊU CẦU ===
-Chỉ viết lại TIÊU ĐỀ Shopee. KHÔNG sửa mô tả — trường description trong JSON phải giữ nguyên y hệt "Mô tả gốc" bên dưới.
+    return `=== PHẠM VI YÊU CẦU (ƯU TIÊN CAO NHẤT) ===
+Chỉ viết lại TIÊU ĐỀ Shopee. BỎ QUA toàn bộ hướng dẫn viết mô tả / cam kết / hashtag trong prompt.
+KHÔNG viết lại mô tả — trường description trong JSON để "" (rỗng); hệ thống giữ nguyên mô tả trên form.
 Tiêu đề được phép dùng dấu / (vd Combo/Bộ, A4/A5) — không loại bỏ chỉ vì là ký tự đặc biệt.`;
   }
   if (scope === "description") {
@@ -108,7 +109,7 @@ Viết lại cả TIÊU ĐỀ và MÔ TẢ Shopee.`;
 function getRewriteJsonOutputRules(scope) {
   if (scope === "title") {
     return `${REWRITE_JSON_OUTPUT_RULES}
-- Chỉ được thay đổi title; description copy nguyên văn từ mô tả gốc trong prompt.`;
+- Chỉ được thay đổi title; description luôn là "" (chuỗi rỗng) — không viết lại mô tả.`;
   }
   if (scope === "description") {
     return `${REWRITE_JSON_OUTPUT_RULES}
@@ -154,6 +155,55 @@ Tên gian hàng duy nhất được phép nhắc trong mô tả mới: {shopName
 - Cấm mọi tên shop/gian hàng khác (vd HAN.X, HAN.X - SHOP BÁCH HOÁ, tên shop cũ trong cam kết). Phần cam kết PHẢI viết lại chỉ nhắc {shopName}.
 - Mô tả gốc đã gỡ tên shop lạ; không thêm tên cửa hàng nào khác ngoài {shopName}.
 - Nếu không có tên gian hàng: không chèn tên shop vào mô tả.`;
+
+const SHOP_NAME_PROMPT_TITLE_ONLY = `=== GIAN HÀNG (chỉ tham khảo tiêu đề — KHÔNG viết mô tả) ===
+Tên gian hàng: {shopName}
+- Chỉ viết lại TIÊU ĐỀ; có thể nhắc tên gian trong tiêu đề nếu phù hợp.
+- Bỏ qua mọi quy tắc về mô tả, cam kết, hashtag bên dưới.`;
+
+/** Loại bỏ phần prompt xung đột khi chỉ viết title hoặc chỉ viết mô tả. */
+function stripPromptSectionsForScope(template, scope) {
+  let t = template;
+  if (scope === "title") {
+    t = t.replace(
+      /\n=== MÔ TẢ SHOPEE[\s\S]*?(?=\nTiêu đề gốc:)/i,
+      "\n",
+    );
+    t = t.replace(/\nMô tả gốc:\s*\n\{description\}\s*/i, "\n");
+    t = t.replace(SHOP_NAME_PROMPT_BLOCK, SHOP_NAME_PROMPT_TITLE_ONLY);
+    t = t.replace(/viết lại tiêu đề và mô tả/gi, "viết lại tiêu đề");
+    t = t.replace(/tiêu đề\/mô tả/gi, "tiêu đề");
+    t = t.replace(/vào title\/description/gi, "vào title");
+    t = t.replace(/và mở đầu mô tả\.?/gi, ".");
+    t = t.replace(/\(làm trước khi viết tiêu đề\/mô tả[^)]*\)/gi, "(làm trước khi viết tiêu đề)");
+    t = t.replace(
+      /chỉ đưa kết quả \(từ khóa đã chọn\) vào title\/description/gi,
+      "chỉ đưa kết quả (từ khóa đã chọn) vào title",
+    );
+  }
+  if (scope === "description") {
+    t = t.replace(
+      /\n=== TIÊU ĐỀ SHOPEE[\s\S]*?(?=\n=== MÔ TẢ SHOPEE|\nTiêu đề gốc:)/i,
+      "\n",
+    );
+    t = t.replace(/\nTiêu đề gốc:\s*\n\{title\}\s*\n\n?/i, "\n");
+    t = t.replace(/viết lại tiêu đề và mô tả/gi, "viết lại mô tả");
+    t = t.replace(/tiêu đề\/mô tả/gi, "mô tả");
+  }
+  return t.trim();
+}
+
+function buildScopeOutputAddon(scope) {
+  if (scope === "title") {
+    return `=== RÀNG BUỘC PHẠM VI (title only) ===
+- Chỉ sửa title; description luôn "" — không viết lại mô tả.`;
+  }
+  if (scope === "description") {
+    return `=== RÀNG BUỘC PHẠM VI (description only) ===
+- Chỉ sửa description; title copy nguyên văn từ tiêu đề gốc trong prompt.`;
+  }
+  return "";
+}
 
 export const DEFAULT_PROMPT_TEMPLATE = `Bạn là chuyên gia SEO Shopee Việt Nam. Viết lại tiêu đề và mô tả bằng tiếng {language} từ nội dung gốc bên dưới. Chỉ dùng thông tin có trong bản gốc hoặc suy ra hợp lý từ ngành hàng; không bịa thương hiệu, thông số, cam kết.
 
@@ -442,15 +492,17 @@ export function fillPromptTemplate(template, vars, options = {}) {
   const cleaned = stripDeprecatedPromptSections(template);
   const patched = patchLegacyPromptWording(cleaned);
   const withShop = ensureShopBlockInTemplate(patched);
-  const filled = withShop
+  const scoped = stripPromptSectionsForScope(withShop, scope);
+  const filled = scoped
     .replace(/\{title\}/g, vars.title ?? "")
     .replace(/\{description\}/g, vars.description ?? "")
     .replace(/\{language\}/g, vars.language ?? "Việt")
     .replace(/\{shopName\}/g, shopLabel)
     .trim();
   const body = `${buildRewriteScopePreamble(scope)}\n\n${filled}`;
+  const addon = buildScopeOutputAddon(scope);
   if (body.includes("ĐẦU RA BẮT BUỘC")) {
-    return body;
+    return addon ? `${body}\n\n${addon}` : body;
   }
   return `${body}\n\n${getRewriteJsonOutputRules(scope)}`;
 }

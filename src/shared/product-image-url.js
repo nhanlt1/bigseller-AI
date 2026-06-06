@@ -13,6 +13,8 @@ const IMAGE_SCOPE_SELECTORS = [
 
 function normalizeImageUrl(raw) {
     const url = String(raw ?? '').trim();
+    if (url.startsWith('blob:'))
+        return url;
     if (!url.startsWith('http'))
         return '';
     try {

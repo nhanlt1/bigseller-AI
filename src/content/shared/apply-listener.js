@@ -7,9 +7,11 @@ export function listenForProductApply(adapter) {
         }
         if (message?.type !== MessageType.APPLY_PRODUCT)
             return false;
-        const data = message.payload;
+        const payload = message.payload ?? {};
+        const scope = payload.scope ?? 'both';
+        const { scope: _scope, ...data } = payload;
         try {
-            const ok = adapter.apply(data);
+            const ok = adapter.apply(data, { scope });
             safeSendResponse(sendResponse, { ok });
         }
         catch (err) {

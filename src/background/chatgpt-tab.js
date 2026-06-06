@@ -1,5 +1,5 @@
 import { MessageType, sendTabMessage } from '../shared/messaging.js';
-import { fetchImageAsBase64 } from '../shared/image-fetch.js';
+import { fetchImagesAsBase64 } from '../shared/image-fetch.js';
 export const CHATGPT_HOME = 'https://chatgpt.com/';
 const CHATGPT_TAB_URL_PATTERNS = [
     'https://chatgpt.com/*',
@@ -86,22 +86,40 @@ export async function ensureChatGPTContentScript(tabId) {
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
-export async function sendChatGPTImagePrompt(tabId, prompt, imageUrl) {
-    let imageBase64;
-    let imageMimeType;
-    const url = String(imageUrl ?? '').trim();
-    if (url) {
-        try {
-            const fetched = await fetchImageAsBase64(url);
-            imageBase64 = fetched.base64;
-            imageMimeType = fetched.mimeType;
-        } catch {
-            /* vẫn điền prompt + mở picker thủ công */
-        }
+function normalizeImageUrlList(imageUrls) {
+    if (!imageUrls)
+        return [];
+    const list = Array.isArray(imageUrls) ? imageUrls : [imageUrls];
+    const seen = new Set();
+    /** @type {string[]} */
+    const out = [];
+    for (const raw of list) {
+        const url = String(raw ?? '').trim();
+        if (!url || seen.has(url))
+            continue;
+        seen.add(url);
+        out.push(url);
+    }
+    return out;
+}
+
+/**
+ * @param {number} tabId
+ * @param {string} prompt
+ * @param {{ images?: { base64?: string, mimeType?: string }[], imageUrls?: string | string[] }} [opts]
+ */
+export async function sendChatGPTImagePrompt(tabId, prompt, opts = {}) {
+    const urls = normalizeImageUrlList(opts.imageUrls);
+    /** @type {{ base64: string, mimeType: string }[]} */
+    let images = Array.isArray(opts.images)
+        ? opts.images.filter((row) => row?.base64?.trim())
+        : [];
+    if (!images.length && urls.length) {
+        images = await fetchImagesAsBase64(urls);
     }
     const message = {
         type: MessageType.CHATGPT_FILL_IMAGE_PROMPT,
-        payload: { prompt, imageBase64, imageMimeType },
+        payload: { prompt, images, imageUrls: urls },
     };
     let lastError = 'Content script ChatGPT chưa sẵn sàng';
     let injected = false;
@@ -118,8 +136,12 @@ export async function sendChatGPTImagePrompt(tabId, prompt, imageUrl) {
         }
         try {
             const res = await sendTabMessage(tabId, message);
-            if (res?.ok)
+            if (res?.ok) {
+                if (urls.length && !res.imageAttached) {
+                    throw new Error('Đã điền prompt nhưng ChatGPT không nhận ảnh — thử đính kèm thủ công (+)');
+                }
                 return;
+            }
             lastError = res?.error ?? lastError;
             if (res && res.ok === false)
                 break;
@@ -134,10 +156,15 @@ export async function sendChatGPTImagePrompt(tabId, prompt, imageUrl) {
     }
     throw new Error(`${lastError}. Hãy mở https://chatgpt.com, F5 trang rồi bấm tạo ảnh lại.`);
 }
-export async function openChatGPTWithImagePrompt(prompt, imageUrl) {
+
+/**
+ * @param {string} prompt
+ * @param {{ images?: { base64?: string, mimeType?: string }[], imageUrls?: string | string[] }} [opts]
+ */
+export async function openChatGPTWithImagePrompt(prompt, opts = {}) {
     const tabId = await getOrCreateChatGPTTab();
     await waitForTabComplete(tabId);
     await sleep(800);
-    await sendChatGPTImagePrompt(tabId, prompt, imageUrl);
+    await sendChatGPTImagePrompt(tabId, prompt, opts);
 }
 export { isNoReceiverError };

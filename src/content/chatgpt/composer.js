@@ -1,4 +1,5 @@
 import { queryFirst, waitForElement } from '../shared/dom-utils.js';
+import { fetchImagesAsBase64 } from '../../shared/image-fetch.js';
 
 const COMPOSER_SELECTORS = [
     '#prompt-textarea',
@@ -26,6 +27,7 @@ const ATTACH_BUTTON_SELECTORS = [
     'button[aria-label*="Đính kèm"]',
     'button[aria-label*="Thêm ảnh"]',
     'button[aria-label*="Tải lên"]',
+    'button[aria-label*="Thêm tệp"]',
 ];
 
 const FILE_INPUT_SELECTORS = [
@@ -33,11 +35,19 @@ const FILE_INPUT_SELECTORS = [
     'input[type="file"]',
 ];
 
-const PHOTO_MENU_LABEL = /photo|ảnh|hình|image|tệp|file|upload|đính kèm/i;
+const PHOTO_MENU_LABEL = /upload from computer|tải lên từ máy|máy tính|upload|tải ảnh|photo|ảnh|hình|image|tệp|file|đính kèm|add photos/i;
+
+const ATTACHMENT_SELECTORS = [
+    '[data-testid*="attachment" i]',
+    '[class*="attachment" i]',
+    '[class*="Attachment" i]',
+    'form.group\\/composer img[src^="blob:"]',
+    '[data-testid="composer"] img[src^="blob:"]',
+];
 
 /**
  * @param {string} prompt
- * @param {{ imageBase64?: string, imageMimeType?: string }} [opts]
+ * @param {{ images?: { base64?: string, mimeType?: string }[], imageUrls?: string[], imageBase64?: string, imageMimeType?: string }} [opts]
  */
 export async function fillChatGPTComposer(prompt, opts = {}) {
     const editor = await waitForElement(COMPOSER_SELECTORS, 20000);
@@ -46,85 +56,191 @@ export async function fillChatGPTComposer(prompt, opts = {}) {
     }
     const editable = resolveEditable(editor);
     await focusComposerEditor(editable);
-    setComposerText(editable, prompt);
-    await sleep(400);
 
-    let imageAttached = false;
-    const base64 = String(opts.imageBase64 ?? '').trim();
-    if (base64) {
-        const file = base64ToFile(
-            base64,
-            opts.imageMimeType || 'image/jpeg',
-            'bigseller-product.jpg',
-        );
-        imageAttached = await attachImageToComposer(editable, file);
+    const files = await buildImageFiles(opts);
+    let imagesAttached = 0;
+    for (let i = 0; i < files.length; i++) {
+        if (await attachImageToComposer(editable, files[i]))
+            imagesAttached += 1;
+        dismissChatGPTOverlays();
+        if (i < files.length - 1)
+            await sleep(400);
     }
 
     let uploadUiOpened = false;
-    if (!imageAttached && !base64) {
+    if (imagesAttached === 0 && files.length > 0) {
         uploadUiOpened = await openComposerUploadUi(editable);
     }
 
-    return { editor: editable, imageAttached, uploadUiOpened };
+    dismissChatGPTOverlays();
+    await sleep(200);
+    setComposerText(editable, prompt);
+    dismissChatGPTOverlays();
+
+    return {
+        editor: editable,
+        imageAttached: imagesAttached > 0,
+        imagesAttached,
+        uploadUiOpened,
+        expectedImages: files.length,
+    };
+}
+
+/** @param {{ images?: { base64?: string, mimeType?: string }[], imageUrls?: string[], imageBase64?: string, imageMimeType?: string }} opts */
+async function buildImageFiles(opts) {
+    /** @type {File[]} */
+    const files = [];
+    const rows = Array.isArray(opts.images) ? opts.images : [];
+    if (rows.length) {
+        rows.forEach((row, i) => {
+            const base64 = String(row?.base64 ?? '').trim();
+            if (!base64)
+                return;
+            const ext = mimeToExt(row.mimeType || 'image/jpeg');
+            files.push(base64ToFile(
+                base64,
+                row.mimeType || 'image/jpeg',
+                `bigseller-product-${i + 1}.${ext}`,
+            ));
+        });
+        return files;
+    }
+    const urls = Array.isArray(opts.imageUrls) ? opts.imageUrls : [];
+    if (urls.length) {
+        const fetched = await fetchImagesAsBase64(urls);
+        fetched.forEach((row, i) => {
+            const ext = mimeToExt(row.mimeType || 'image/jpeg');
+            files.push(base64ToFile(
+                row.base64,
+                row.mimeType || 'image/jpeg',
+                `bigseller-product-${i + 1}.${ext}`,
+            ));
+        });
+        return files;
+    }
+    const base64 = String(opts.imageBase64 ?? '').trim();
+    if (base64) {
+        files.push(base64ToFile(
+            base64,
+            opts.imageMimeType || 'image/jpeg',
+            'bigseller-product-1.jpg',
+        ));
+    }
+    return files;
+}
+
+function mimeToExt(mimeType) {
+    const mime = String(mimeType ?? '').toLowerCase();
+    if (mime.includes('png'))
+        return 'png';
+    if (mime.includes('webp'))
+        return 'webp';
+    if (mime.includes('gif'))
+        return 'gif';
+    return 'jpg';
 }
 
 /**
- * dispatchEvent(KeyboardEvent) có isTrusted=false — trình duyệt chặn phím tắt mở file picker.
- * Thay bằng paste/drop/file-input hoặc bấm nút đính kèm trên UI ChatGPT.
+ * Đính kèm từng ảnh qua file input hoặc paste (không dùng drag/drop — gây kẹt overlay ChatGPT).
  */
 async function attachImageToComposer(editor, file) {
     const composerRoot = findComposerRoot(editor);
     const before = countComposerAttachments(composerRoot);
 
-    const input =
+    const existingInput =
         queryFirst(FILE_INPUT_SELECTORS, composerRoot) ??
         queryFirst(FILE_INPUT_SELECTORS, document);
-    if (input instanceof HTMLInputElement) {
-        if (assignFileToInput(input, file)) {
-            if (await waitForMoreAttachments(composerRoot, before))
+    if (existingInput instanceof HTMLInputElement) {
+        if (assignFileToInput(existingInput, file)) {
+            if (await waitForMoreAttachments(composerRoot, before, 5000))
                 return true;
-            return false;
         }
     }
 
     await clickAttachButton(composerRoot);
+    await sleep(400);
+    clickPhotoMenuItem();
     await sleep(350);
-    const openedInput = await waitForFileInput(composerRoot, 2000);
+    const openedInput = await waitForFileInput(composerRoot, 3000);
     if (openedInput instanceof HTMLInputElement) {
         if (assignFileToInput(openedInput, file)) {
-            if (await waitForMoreAttachments(composerRoot, before))
+            if (await waitForMoreAttachments(composerRoot, before, 5000))
                 return true;
-            return false;
         }
     }
 
     if (await tryPasteImageFile(editor, file)) {
-        await sleep(450);
-        if (countComposerAttachments(composerRoot) > before)
+        await sleep(700);
+        if (await waitForMoreAttachments(composerRoot, before, 5000))
             return true;
     }
 
     return false;
 }
 
-function countComposerAttachments(root) {
-    const scope = root instanceof Element ? root : document;
-    const inScope = scope.querySelectorAll(
-        '[data-testid*="attachment" i], [class*="attachment" i], [class*="Attachment" i], img[src^="blob:"]',
-    ).length;
-    if (inScope > 0)
-        return inScope;
-    return document.querySelectorAll(
-        'form.group\\/composer [data-testid*="attachment" i], form.group\\/composer img[src^="blob:"]',
-    ).length;
+/** Đóng overlay kéo-thả / menu bị kẹt sau attach giả lập. */
+function dismissChatGPTOverlays() {
+    try {
+        const dt = new DataTransfer();
+        for (const target of [document, document.body, document.documentElement]) {
+            target.dispatchEvent(new DragEvent('dragleave', {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: dt,
+            }));
+            target.dispatchEvent(new DragEvent('dragend', {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: dt,
+            }));
+        }
+    }
+    catch {
+        /* DragEvent không khả dụng */
+    }
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        keyCode: 27,
+        which: 27,
+        bubbles: true,
+        cancelable: true,
+    }));
+
+    for (const el of document.querySelectorAll(
+        'div.fixed, div[class*="fixed"], div[class*="inset-0"], div[class*="z-"]',
+    )) {
+        if (!(el instanceof HTMLElement))
+            continue;
+        const text = el.textContent ?? '';
+        if (!/Thả bất kỳ tệp|Drop any file|Thêm bất kỳ điều gì/i.test(text))
+            continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < window.innerWidth * 0.4 || rect.height < window.innerHeight * 0.4)
+            continue;
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+        el.setAttribute('aria-hidden', 'true');
+    }
 }
 
-async function waitForMoreAttachments(root, before, timeoutMs = 1500) {
+function countComposerAttachments(root) {
+    const scope = root instanceof Element ? root : document;
+    for (const sel of ATTACHMENT_SELECTORS) {
+        const count = scope.querySelectorAll(sel).length;
+        if (count > 0)
+            return count;
+    }
+    return document.querySelectorAll(ATTACHMENT_SELECTORS.join(', ')).length;
+}
+
+async function waitForMoreAttachments(root, before, timeoutMs = 5000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (countComposerAttachments(root) > before)
             return true;
-        await sleep(120);
+        await sleep(150);
     }
     return countComposerAttachments(root) > before;
 }
@@ -162,31 +278,40 @@ async function clickAttachButton(root) {
 
 function clickPhotoMenuItem() {
     const items = document.querySelectorAll(
-        '[role="menuitem"], [role="menuitemradio"], [role="option"], button, a',
+        '[role="menuitem"], [role="menuitemradio"], [role="option"], button, a, div[tabindex="0"]',
     );
+    /** @type {HTMLElement[]} */
+    const matches = [];
     for (const el of items) {
+        if (!(el instanceof HTMLElement))
+            continue;
         const label = (
             el.getAttribute('aria-label') ||
             el.textContent ||
             ''
         ).trim();
-        if (PHOTO_MENU_LABEL.test(label)) {
-            el.click();
-            return true;
-        }
+        if (PHOTO_MENU_LABEL.test(label))
+            matches.push(el);
     }
-    return false;
+    const preferred = matches.find((el) => {
+        const label = (el.getAttribute('aria-label') || el.textContent || '').trim();
+        return /upload from computer|tải lên từ máy|máy tính|upload file|tải ảnh lên/i.test(label);
+    });
+    (preferred ?? matches[0])?.click();
+    return Boolean(preferred ?? matches[0]);
 }
 
 async function waitForFileInput(root, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const input = queryFirst(FILE_INPUT_SELECTORS, root ?? document);
-        if (input instanceof HTMLInputElement)
-            return input;
-        const global = queryFirst(FILE_INPUT_SELECTORS, document);
-        if (global instanceof HTMLInputElement)
-            return global;
+        const inputs = [
+            ...Array.from((root ?? document).querySelectorAll(FILE_INPUT_SELECTORS.join(', '))),
+            ...Array.from(document.querySelectorAll(FILE_INPUT_SELECTORS.join(', '))),
+        ];
+        for (const input of inputs) {
+            if (input instanceof HTMLInputElement)
+                return input;
+        }
         await sleep(120);
     }
     return null;

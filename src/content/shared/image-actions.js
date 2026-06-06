@@ -1,3 +1,4 @@
+import { fetchImagesAsBase64 } from '../../shared/image-fetch.js';
 import { MessageType, sendMessage } from '../../shared/messaging.js';
 import { buildProductImagePrompt } from '../../shared/product-image-prompt.js';
 import {
@@ -19,9 +20,16 @@ export async function openChatGPTProductImage(adapter, mode) {
         throw new Error('Không thấy ảnh sản phẩm trên trang — thêm ảnh rồi thử lại');
     }
 
-    const imageUrl = await promptProductImagePicker(candidates);
-    if (imageUrl === null) {
+    const imageUrls = await promptProductImagePicker(candidates);
+    if (imageUrls === null) {
         return;
+    }
+
+    const images = imageUrls.length
+        ? await fetchImagesAsBase64(imageUrls)
+        : [];
+    if (imageUrls.length && !images.length) {
+        throw new Error('Không tải được ảnh sản phẩm — reload trang Shopee/BigSeller rồi thử lại');
     }
 
     const prompt = buildProductImagePrompt(
@@ -31,7 +39,11 @@ export async function openChatGPTProductImage(adapter, mode) {
     );
     const result = await sendMessage({
         type: MessageType.OPEN_CHATGPT_IMAGE,
-        payload: { prompt, imageUrl: imageUrl || undefined },
+        payload: {
+            prompt,
+            images,
+            imageUrls: imageUrls.length ? imageUrls : undefined,
+        },
     });
     if (!result.ok) {
         throw new Error(result.error ?? 'Không mở được ChatGPT');

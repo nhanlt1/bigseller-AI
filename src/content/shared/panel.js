@@ -69,11 +69,13 @@ export class FloatingPanel {
     }
 
     async handleRewrite(scope = 'both') {
-        const ctx = this.promptContextFromPage();
-        if (!ctx) {
+        const product = this.adapter.extract();
+        if (!product?.title && !product?.description) {
             this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
             return;
         }
+        const platform = this.adapter.platform ?? 'shopee';
+        const ctx = buildPromptProductContext(product, platform);
         if (scope === 'title' && !ctx.title?.trim()) {
             this.setState('error', 'Không đọc được tiêu đề từ form');
             return;
@@ -91,6 +93,8 @@ export class FloatingPanel {
                 payload: {
                     title: ctx.title,
                     description: ctx.description,
+                    originalTitle: product.title ?? '',
+                    originalDescription: product.description ?? '',
                     shopName: ctx.shopName,
                     language: settings.language,
                     scope,
@@ -101,9 +105,9 @@ export class FloatingPanel {
             if (!result.ok || !result.data) {
                 throw new Error(result.error ?? 'Gemini không trả về kết quả');
             }
-            const data = sanitizeRewrittenProduct(result.data, ctx.shopName);
+            const data = sanitizeRewrittenProduct(result.data, ctx.shopName, scope);
             this.lastResult = data;
-            const ok = this.adapter.apply(data);
+            const ok = this.adapter.apply(data, { scope });
             this.setState(ok ? 'done' : 'error', ok
                 ? undefined
                 : 'Có JSON nhưng không điền được form — kiểm tra trang');

@@ -230,8 +230,28 @@ export function truncateShopeeField(text, maxLength) {
 }
 
 /** Làm sạch title/description sau Gemini: gỡ shop lạ, giữ đúng shopName, cắt giới hạn Shopee. */
-export function sanitizeRewrittenProduct(product, shopName = "") {
+export function sanitizeRewrittenProduct(product, shopName = "", scope = "both") {
   const allowed = shopName?.trim() ?? "";
+  if (scope === "title") {
+    return {
+      title: truncateShopeeField(
+        stripShopNamesFromText(product.title ?? "", { allowedShopName: allowed }),
+        SHOPEE_TITLE_TARGET_MAX_LENGTH,
+      ),
+      description: product.description ?? "",
+    };
+  }
+  if (scope === "description") {
+    let description = stripShopNamesFromText(product.description ?? "", {
+      allowedShopName: allowed,
+    });
+    if (allowed) description = ensureShopNameInCommitment(description, allowed);
+    description = truncateShopeeField(description, SHOPEE_DESCRIPTION_MAX_LENGTH);
+    return {
+      title: product.title ?? "",
+      description,
+    };
+  }
   const title = truncateShopeeField(
     stripShopNamesFromText(product.title ?? "", { allowedShopName: allowed }),
     SHOPEE_TITLE_TARGET_MAX_LENGTH,
