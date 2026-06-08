@@ -311,16 +311,32 @@ function isOptimizeServiceWorkerUnavailable(message) {
 
 export const DESC_TOOLBAR_ID = 'bigseller-ai-desc-toolbar';
 
+const DESC_REWRITE_BUTTON_IDS = [
+    'optimize',
+    'rewrite-title',
+    'rewrite-desc',
+    'rewrite-both',
+];
+
 /** Nút viết lại + copy/áp dụng — neo vùng mô tả (BigSeller / Shopee). */
 export function mountProductDescriptionToolbar(panel, platform) {
     document.getElementById('bigseller-ai-toggle')?.remove();
-    const busyWrap = async (fn) => {
-        setEditorToolbarBusy(DESC_TOOLBAR_ID, true);
+    const rewriteBusyWrap = async (fn) => {
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, true, { only: DESC_REWRITE_BUTTON_IDS });
         try {
             await fn();
         }
         finally {
-            setEditorToolbarBusy(DESC_TOOLBAR_ID, false);
+            setEditorToolbarBusy(DESC_TOOLBAR_ID, false, { only: DESC_REWRITE_BUTTON_IDS });
+        }
+    };
+    const actionBusyWrap = async (buttonId, fn) => {
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, true, { only: [buttonId] });
+        try {
+            await fn();
+        }
+        finally {
+            setEditorToolbarBusy(DESC_TOOLBAR_ID, false, { only: [buttonId] });
         }
     };
     mountFloatingEditorToolbar({
@@ -339,31 +355,31 @@ export function mountProductDescriptionToolbar(panel, platform) {
                 id: 'rewrite-title',
                 label: 'Tên SP',
                 primary: true,
-                onClick: () => busyWrap(() => panel.rewrite('title')),
+                onClick: () => rewriteBusyWrap(() => panel.rewrite('title')),
             },
             {
                 id: 'rewrite-desc',
                 label: 'Mô tả',
                 primary: true,
-                onClick: () => busyWrap(() => panel.rewrite('description')),
+                onClick: () => rewriteBusyWrap(() => panel.rewrite('description')),
             },
             {
                 id: 'rewrite-both',
                 label: 'Tên + mô tả',
                 primary: true,
-                onClick: () => busyWrap(() => panel.rewrite('both')),
+                onClick: () => rewriteBusyWrap(() => panel.rewrite('both')),
             },
             {
                 id: 'copy-prompt',
                 label: 'Copy prompt',
                 ghost: true,
-                onClick: () => busyWrap(() => panel.copyPrompt()),
+                onClick: () => actionBusyWrap('copy-prompt', () => panel.copyPrompt()),
             },
             {
                 id: 'apply',
                 label: 'Áp dụng',
                 ghost: true,
-                onClick: () => busyWrap(() => panel.applyFromClipboard()),
+                onClick: () => actionBusyWrap('apply', () => panel.applyFromClipboard()),
             },
         ],
     });

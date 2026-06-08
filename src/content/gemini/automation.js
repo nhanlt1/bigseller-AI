@@ -50,9 +50,9 @@ export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDesc
         const sourceHash = sourceTitle !== undefined
             ? hashProductContent(sourceTitle, sourceDescription ?? '')
             : undefined;
-        const snapshot = await captureSendSnapshot(sourceHash);
         fillGeminiInput(editor, prompt);
         await new Promise((r) => setTimeout(r, 400));
+        const snapshot = await captureSendSnapshot(sourceHash, prompt, sourceTitle ?? '');
         if (!clickSend()) {
             throw new Error('Không thể gửi tin nhắn (nút Send không khả dụng)');
         }

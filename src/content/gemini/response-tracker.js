@@ -1,7 +1,7 @@
 import { getGeminiLastResponseHash, } from '../../shared/storage.js';
 import { parseGeminiKeywordsJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
 import { hashText } from '../../shared/text-hash.js';
-import { getModelResponseElements, isGeminiGenerating } from './dom-query.js';
+import { getModelResponseElements, getUserQueryElements, isGeminiGenerating } from './dom-query.js';
 import { buildBubbleRows, geminiDebugClearPanel, geminiDebugLog, geminiDebugTable, probeSelectorCounts, } from './gemini-debug-log.js';
 /** Băm mỗi 1 giây; 2 lần liên tiếp trùng = stream xong */
 const POLL_INTERVAL_MS = 1000;
@@ -28,15 +28,61 @@ function pickWatchBubble(nodes, snapshot) {
         return {
             el: nodes[index],
             index,
-            strategy: `bubble_mới tại index=${index} (nodes=${nodes.length} > modelCount=${snapshot.modelCount})`,
+            inPlace: false,
+            strategy: `bubble_mới index=${index} (nodes=${nodes.length} > modelCount=${snapshot.modelCount})`,
         };
     }
-    const tailIndex = nodes.length - 1;
-    return {
-        el: nodes[tailIndex],
-        index: tailIndex,
-        strategy: `bubble_đuôi index=${tailIndex} (chưa thêm node; nodes=${nodes.length} === modelCount=${snapshot.modelCount})`,
-    };
+    if (nodes.length === snapshot.modelCount) {
+        const tailIndex = nodes.length - 1;
+        return {
+            el: nodes[tailIndex],
+            index: tailIndex,
+            inPlace: true,
+            strategy: `bubble_đuôi index=${tailIndex} (stream tại chỗ, nodes=${nodes.length})`,
+        };
+    }
+    return null;
+}
+function isExpectedModelBubble(picked, snapshot, currentHash) {
+    if (!picked)
+        return false;
+    if (picked.index === snapshot.modelCount)
+        return true;
+    if (picked.inPlace &&
+        picked.index === snapshot.modelCount - 1 &&
+        snapshot.modelCount > 0 &&
+        currentHash !== snapshot.baselineHash) {
+        return true;
+    }
+    return false;
+}
+function verifyLatestUserBubble(snapshot) {
+    const users = getUserQueryElements(document);
+    if (users.length === 0) {
+        return { ok: true };
+    }
+    if (users.length <= snapshot.userCount) {
+        return {
+            ok: false,
+            reason: `chưa thấy user bubble mới (users=${users.length}, cần > ${snapshot.userCount})`,
+        };
+    }
+    const text = readBubbleText(users[users.length - 1]);
+    if (!text) {
+        return { ok: false, reason: 'user bubble mới nhất rỗng' };
+    }
+    const titleSnippet = snapshot.sourceTitleSnippet;
+    if (titleSnippet && text.includes(titleSnippet)) {
+        return { ok: true };
+    }
+    const snippet = snapshot.promptSnippet;
+    if (snippet && (text.includes(snippet) || text.includes(snippet.slice(0, 60)))) {
+        return { ok: true };
+    }
+    if (snapshot.promptHash && hashText(text) === snapshot.promptHash) {
+        return { ok: true };
+    }
+    return { ok: true };
 }
 /** @typedef {'keywords' | 'product'} GeminiExpectedSchema */
 
@@ -65,14 +111,27 @@ function isNewResponseHash(currentHash, snapshot) {
 
 function scanForFreshResponse(scope, snapshot, expectedSchema) {
     const nodes = getModelResponseElements(scope);
-    for (let i = nodes.length - 1; i >= 0; i--) {
-        const text = readBubbleText(nodes[i]);
+    const userCheck = verifyLatestUserBubble(snapshot);
+    if (!userCheck.ok)
+        return null;
+    const candidates = [];
+    if (nodes.length > snapshot.modelCount) {
+        candidates.push({ index: snapshot.modelCount, inPlace: false });
+    }
+    else if (nodes.length === snapshot.modelCount && nodes.length > 0) {
+        candidates.push({ index: nodes.length - 1, inPlace: true });
+    }
+    for (const { index, inPlace } of candidates) {
+        const text = readBubbleText(nodes[index]);
         if (!text || !hasValidGeminiJson(text, expectedSchema))
             continue;
         const currentHash = hashText(text);
         if (!isNewResponseHash(currentHash, snapshot).ok)
             continue;
-        return { text, index: i, hash: currentHash };
+        const picked = { index, inPlace };
+        if (!isExpectedModelBubble(picked, snapshot, currentHash))
+            continue;
+        return { text, index, hash: currentHash };
     }
     return null;
 }
@@ -91,7 +150,7 @@ function refreshWatchCache(scope, snapshot, cache, forceScan, forceReason) {
         if (nodes.length > snapshot.modelCount) {
             forceScan = true;
         }
-        else if (nodes.length > 0) {
+        else if (nodes.length === snapshot.modelCount && nodes.length > 0) {
             const tailIndex = nodes.length - 1;
             const tail = nodes[tailIndex];
             cache.bubble = tail;
@@ -99,8 +158,14 @@ function refreshWatchCache(scope, snapshot, cache, forceScan, forceReason) {
             return {
                 el: tail,
                 index: tailIndex,
-                strategy: `cache-đuôi index=${tailIndex} (cập nhật tại chỗ, nodes=${nodes.length})`,
+                inPlace: true,
+                strategy: `cache-đuôi index=${tailIndex} (stream tại chỗ)`,
             };
+        }
+        else {
+            cache.bubble = null;
+            cache.bubbleIndex = -1;
+            return null;
         }
     }
     const nodes = getModelResponseElements(scope);
@@ -118,41 +183,59 @@ function refreshWatchCache(scope, snapshot, cache, forceScan, forceReason) {
     }
     return picked;
 }
-export async function captureSendSnapshot(sourceContentHash) {
+export async function captureSendSnapshot(sourceContentHash, promptText = '', sourceTitle = '') {
     geminiDebugClearPanel();
     geminiDebugLog('snapshot', '── Bắt đầu captureSendSnapshot (trước khi gửi prompt) ──');
     const docNodes = getModelResponseElements(document);
+    const userNodes = getUserQueryElements(document);
     const modelCount = docNodes.length;
+    const userCount = userNodes.length;
     const lastText = modelCount > 0 ? readBubbleText(docNodes[modelCount - 1]) : '';
     const previousResponseHash = await getGeminiLastResponseHash();
     const baselineHash = hashText(lastText);
+    const promptTrimmed = promptText.trim();
+    const promptHash = promptTrimmed ? hashText(promptTrimmed) : undefined;
+    const promptSnippet = promptTrimmed ? promptTrimmed.slice(0, 120) : undefined;
+    const sourceTitleSnippet = String(sourceTitle ?? '').trim().slice(0, 80) || undefined;
     geminiDebugLog('snapshot', 'Quét toàn document (đã dedupe nested)', {
         modelCount,
+        userCount,
         selectorProbe: probeSelectorCounts(document),
         tailIndex: modelCount > 0 ? modelCount - 1 : null,
+        watchModelIndex: modelCount,
     });
     if (modelCount > 0) {
-        geminiDebugTable('snapshot', `Bubble document — theo dõi index=${modelCount} khi có câu mới`, buildBubbleRows(docNodes), modelCount - 1);
+        geminiDebugTable('snapshot', `Bubble model — chờ bubble mới tại index=${modelCount}`, buildBubbleRows(docNodes), modelCount - 1);
+    }
+    if (userCount > 0) {
+        geminiDebugTable('snapshot', `Bubble user — cần thêm sau Send (hiện=${userCount})`, buildBubbleRows(userNodes), userCount - 1);
     }
     geminiDebugLog('snapshot', 'Mã băm trước khi gửi', {
         modelCount,
+        userCount,
         baselineHash,
         previousResponseHash: previousResponseHash ?? '(chưa có)',
         sourceContentHash: sourceContentHash ?? '(không)',
+        promptHash: promptHash ?? '(không)',
         lastBubblePreview: lastText.slice(0, 100) || '(rỗng)',
     });
     return {
         modelCount,
+        userCount,
         baselineHash,
         previousResponseHash,
         scopedRoot: document,
         sourceContentHash,
+        promptHash,
+        promptSnippet,
+        sourceTitleSnippet,
     };
 }
 export function waitForNewStableResponse(snapshot, timeoutMs = 120000, expectedSchema = 'product') {
     pollTickCount = 0;
     geminiDebugLog('wait', '── Bắt đầu chờ phản hồi mới (poll 1s) ──', {
         modelCount: snapshot.modelCount,
+        userCount: snapshot.userCount,
         baselineHash: snapshot.baselineHash,
         previousResponseHash: snapshot.previousResponseHash,
         timeoutMs,
@@ -204,9 +287,12 @@ export function waitForNewStableResponse(snapshot, timeoutMs = 120000, expectedS
             }
             const hash = lastSeenText ? hashText(lastSeenText) : '';
             const hashCheck = isNewResponseHash(hash, snapshot);
+            const userCheck = verifyLatestUserBubble(snapshot);
             if (lastSeenText &&
                 hasValidGeminiJson(lastSeenText, expectedSchema) &&
-                hashCheck.ok) {
+                hashCheck.ok &&
+                userCheck.ok &&
+                isExpectedModelBubble({ index: lastIndex, inPlace: lastIndex === snapshot.modelCount - 1 && snapshot.modelCount > 0 }, snapshot, hash)) {
                 geminiDebugLog('wait', 'Timeout nhưng đủ điều kiện → áp dụng');
                 succeed(lastSeenText, lastIndex);
                 return;
@@ -284,16 +370,24 @@ export function waitForNewStableResponse(snapshot, timeoutMs = 120000, expectedS
             }
             const hashCheck = isNewResponseHash(currentHash, snapshot);
             const jsonOk = hasValidGeminiJson(text, expectedSchema);
+            const userCheck = verifyLatestUserBubble(snapshot);
+            const isExpectedBubble = isExpectedModelBubble(picked, snapshot, currentHash);
             const settled =
                 isStreamingSettled(stableStreak) ||
                 (!generating && jsonOk && stableStreak >= 1);
             const blockers = [];
+            if (generating && !settled)
+                blockers.push('Gemini đang generate');
+            if (!isExpectedBubble)
+                blockers.push(`sai bubble (index=${picked.index}, modelCount=${snapshot.modelCount})`);
             if (!settled)
                 blockers.push(`ổn định ${stableStreak}/${STABLE_POLLS_REQUIRED}`);
             if (!hashCheck.ok)
                 blockers.push(hashCheck.reason);
             if (!jsonOk)
                 blockers.push(`chưa parse được ${jsonSchemaLabel(expectedSchema)}`);
+            if (!userCheck.ok)
+                blockers.push(userCheck.reason);
             const shouldLog = tickN <= 3 ||
                 tickN % 5 === 0 ||
                 blockers.length === 0 ||
@@ -309,20 +403,15 @@ export function waitForNewStableResponse(snapshot, timeoutMs = 120000, expectedS
                     blockers: blockers.length ? blockers : ['(sẵn sàng hoàn tất)'],
                 });
             }
-            if (settled && jsonOk && hashCheck.ok) {
+            if (settled &&
+                jsonOk &&
+                hashCheck.ok &&
+                userCheck.ok &&
+                isExpectedBubble) {
                 window.clearInterval(interval);
                 window.clearTimeout(timeout);
                 succeed(text, picked.index);
                 return;
-            }
-            if (settled && jsonOk && !hashCheck.ok) {
-                const scanned = scanForFreshResponse(scope, snapshot, expectedSchema);
-                if (scanned) {
-                    window.clearInterval(interval);
-                    window.clearTimeout(timeout);
-                    geminiDebugLog('poll', `#${tickN} bubble theo dõi trùng baseline — dùng bubble index=${scanned.index}`);
-                    succeed(scanned.text, scanned.index);
-                }
             }
         };
         const interval = window.setInterval(tick, POLL_INTERVAL_MS);

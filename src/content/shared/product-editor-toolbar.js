@@ -177,11 +177,27 @@ export function refreshEditorToolbar(hostId) {
     host?._reposition?.();
 }
 
-export function setEditorToolbarBusy(hostId, busy) {
+/**
+ * @param {string} hostId
+ * @param {boolean} busy
+ * @param {{ only?: string[], except?: string[] }} [options]
+ *   only — chỉ đổi trạng thái các nút có id suffix (vd. `rewrite-title`);
+ *   except — bỏ qua các nút đó (ưu tiên thấp hơn `only`).
+ */
+export function setEditorToolbarBusy(hostId, busy, options) {
     const host = document.getElementById(hostId);
     if (!host)
         return;
+    const only = options?.only;
+    const except = options?.except ?? [];
     host.querySelectorAll('button').forEach((btn) => {
+        const suffix = btn.id.startsWith(`${hostId}-`)
+            ? btn.id.slice(hostId.length + 1)
+            : btn.id;
+        if (only && !only.includes(suffix))
+            return;
+        if (!only && except.includes(suffix))
+            return;
         btn.disabled = busy;
     });
 }

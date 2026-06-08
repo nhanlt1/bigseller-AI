@@ -12,15 +12,15 @@ export const GEMINI_SEND_SELECTORS = [
     '.input-area button[type="submit"]',
     'button[mattooltip="Send message"]',
 ];
-/** Một selector — dùng với queryAllDeep trong dom-query */
+/** Bubble model — `message-content` lọc user bubble qua dom-query.isUserMessage */
 export const GEMINI_MODEL_RESPONSE_SELECTOR = 'message-content.model-response-text, message-content, .model-response-text, [data-test-id="model-response"], [data-message-author-role="model"]';
+/** Bubble tin nhắn người dùng (prompt vừa gửi). */
+export const GEMINI_USER_QUERY_SELECTOR = 'user-query, message-content.user-query, .user-query, [data-message-author-role="user"]';
 /** Chỉ nút dừng stream — tránh nhầm nút Cancel khác trên trang */
 export const GEMINI_GENERATING_SELECTORS = [
     'button[aria-label="Stop response"]',
     'button[aria-label="Stop streaming"]',
     'button[aria-label="Dừng phản hồi"]',
     'button[aria-label="Dừng tạo nội dung"]',
-    'button[aria-label*="Stop"]',
-    'button[aria-label*="Dừng"]',
     'button[data-test-id="stop-button"]',
 ];
