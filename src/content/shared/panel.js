@@ -14,6 +14,13 @@ import {
     refreshEditorToolbar,
     setEditorToolbarBusy,
 } from './product-editor-toolbar.js';
+import { showOptimizeCostDialog } from './optimize-cost-dialog.js';
+import {
+    buildOptimizeProductKey,
+    buildSessionCrawlResults,
+    getStoredOptimizeKeywords,
+    reopenStoredOptimizeReview,
+} from './optimize-review-sidebar.js';
 
 const PANEL_HOST_ID = 'bigseller-ai-panel-host';
 
@@ -236,6 +243,64 @@ export class FloatingPanel {
         this.finishOptimizeRun();
     }
 
+    async handleOptimizeManualClipboard() {
+        try {
+            const raw = await navigator.clipboard.readText();
+            if (!raw?.trim()) {
+                throw new Error('Clipboard trống — copy phản hồi JSON từ Gemini trước');
+            }
+            const result = await sendMessage({
+                type: MessageType.OPTIMIZE_MANUAL_CLIPBOARD,
+                payload: { text: raw.trim() },
+            });
+            if (!result?.ok) {
+                throw new Error(result?.error ?? 'Không nhận được dữ liệu thủ công');
+            }
+            updateOptimizeProgress('Đã nhận dữ liệu thủ công — đang hoàn tất…', { waitingCaptcha: false });
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : 'Không đọc được clipboard';
+            updateOptimizeProgress(msg, { waitingCaptcha: false });
+        }
+    }
+
+    async handleOptimizePasteFromGemini(pagePayload, costChoice) {
+        this.setState('busy');
+        setEditorToolbarBusy(DESC_TOOLBAR_ID, true);
+        showOptimizeProgress('Đang áp dụng kết quả từ Gemini…');
+        try {
+            const productKey = buildOptimizeProductKey(pagePayload);
+            const result = await sendMessage({
+                type: MessageType.OPTIMIZE_PASTE_GEMINI,
+                payload: {
+                    ...pagePayload,
+                    geminiText: costChoice.pastedGeminiText,
+                    costPerUnit: costChoice.costPerUnit,
+                    minSellPrice: costChoice.minSellPrice,
+                    profitTargetPerUnit: costChoice.profitTargetPerUnit,
+                    costSkipped: costChoice.costSkipped,
+                    sessionCrawlResults: buildSessionCrawlResults(productKey),
+                    sessionKeywords: getStoredOptimizeKeywords(productKey),
+                },
+            });
+            if (!result?.ok) {
+                throw new Error(result?.error ?? 'Không áp dụng được kết quả Gemini');
+            }
+            this.finishOptimizeRun();
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : 'Không áp dụng được kết quả Gemini';
+            if (isOptimizeServiceWorkerUnavailable(msg)) {
+                this.finishOptimizeRun();
+                this.setState('error', 'Pipeline chưa sẵn sàng — Reload extension rồi thử lại.');
+                return;
+            }
+            updateOptimizeProgress(msg, { waitingCaptcha: false });
+            window.setTimeout(() => this.finishOptimizeRun(), 2800);
+            this.setState('error', msg);
+        }
+    }
+
     async handleOptimizeResume() {
         updateOptimizeProgress('Đang tiếp tục sau CAPTCHA…', { waitingCaptcha: false });
         try {
@@ -263,12 +328,27 @@ export class FloatingPanel {
             this.setState('error', 'Không đọc được tiêu đề/mô tả từ trang');
             return;
         }
+        const productKey = buildOptimizeProductKey(payload);
+        if (reopenStoredOptimizeReview(productKey)) {
+            this.setState('idle');
+            return;
+        }
+        const costChoice = await showOptimizeCostDialog();
+        if (!costChoice) {
+            this.setState('idle');
+            return;
+        }
+        if (costChoice.pastedGeminiText) {
+            await this.handleOptimizePasteFromGemini(payload, costChoice);
+            return;
+        }
         this.setState('busy');
         setEditorToolbarBusy(DESC_TOOLBAR_ID, true);
         showOptimizeProgress('Đang khởi động pipeline…');
         setOptimizeProgressCallbacks({
             onCancel: () => void this.handleOptimizeCancel(),
             onResume: () => void this.handleOptimizeResume(),
+            onManualClipboard: () => void this.handleOptimizeManualClipboard(),
             onDone: () => this.finishOptimizeRun(),
             onError: (message) => {
                 setEditorToolbarBusy(DESC_TOOLBAR_ID, false);
@@ -281,11 +361,18 @@ export class FloatingPanel {
         try {
             const result = await sendMessage({
                 type: MessageType.OPTIMIZE_PRODUCT,
-                payload,
+                payload: {
+                    ...payload,
+                    costPerUnit: costChoice.costPerUnit,
+                    minSellPrice: costChoice.minSellPrice,
+                    profitTargetPerUnit: costChoice.profitTargetPerUnit,
+                    costSkipped: costChoice.costSkipped,
+                },
             });
             if (!result?.ok) {
                 throw new Error(result?.error ?? 'Pipeline chưa sẵn sàng');
             }
+            this.finishOptimizeRun();
         }
         catch (err) {
             const msg = err instanceof Error ? err.message : 'Không tối ưu được';

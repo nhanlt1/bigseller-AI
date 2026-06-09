@@ -29,6 +29,12 @@ export const MessageType = {
     OPTIMIZE_PROGRESS: 'OPTIMIZE_PROGRESS',
     /** Edit tab → SW: hủy pipeline đang chạy */
     OPTIMIZE_CANCEL: 'OPTIMIZE_CANCEL',
+    /** SW → edit tab: kết quả tối ưu + dữ liệu SERP (mở sidebar) */
+    OPTIMIZE_RESULT: 'OPTIMIZE_RESULT',
+    /** Edit tab → SW: dán JSON phản hồi Gemini từ clipboard (bỏ qua chờ auto-detect) */
+    OPTIMIZE_MANUAL_CLIPBOARD: 'OPTIMIZE_MANUAL_CLIPBOARD',
+    /** Edit tab → SW: dán kết quả Gemini từ popup giá vốn (pipeline lỗi / bỏ qua crawl) */
+    OPTIMIZE_PASTE_GEMINI: 'OPTIMIZE_PASTE_GEMINI',
 };
 /** Gọi sendResponse an toàn — tránh lỗi khi channel đã đóng */
 export function safeSendResponse(sendResponse, payload) {

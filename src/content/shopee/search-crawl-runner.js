@@ -1,5 +1,5 @@
 import { getSettings } from "../../shared/storage.js";
-import { mapRowsToOptimizeSerp } from "../../shared/optimize-serp-columns.js";
+import { mapRowsToOptimizeSerp, mapRowsToOptimizeUi } from "../../shared/optimize-serp-columns.js";
 import { waitForElement } from "../shared/dom-utils.js";
 import { isShopeeSearchUrl } from "./shopee-host.js";
 import {
@@ -29,13 +29,20 @@ const CAPTCHA_SELECTORS = [
   ".nc-container",
 ];
 
-/** Sau khi URL khớp từ khóa — chờ 1 s rồi PageDown */
-const KEYWORD_SETTLE_MS = 1000;
-/** Khoảng cách giữa mỗi lần PageDown */
-const PAGE_DOWN_INTERVAL_MS = 500;
+/** Chờ tối thiểu sau khi URL khớp từ khóa — 0 = cuộn ngay */
+const KEYWORD_POST_NAV_MS = 0;
+/** Chỉ chờ thêm khi chưa chắc lazy-load xong */
+const KEYWORD_POST_SCROLL_MS = 0;
+/** Khoảng cách mặc định giữa mỗi bước cuộn (override bằng scrollStepDelayMs) */
+const PAGE_DOWN_INTERVAL_DEFAULT_MS = 500;
+/** Mỗi bước cuộn ~ ba hàng SP (480×3) */
+const SCROLL_STEP_PX = 1440;
 const KEYWORD_URL_MATCH_MS = 30_000;
-const MIN_SANITY_PRODUCTS = 5;
-const MAX_PAGE_DOWN_STEPS = 80;
+/** Số vòng poll: count + scrollHeight không đổi ở đáy trang */
+const SCROLL_STABLE_ROUNDS = 3;
+const LAZY_LOAD_POLL_MS = 350;
+const SCROLL_NUDGE_UP_PX = 280;
+const MAX_PAGE_DOWN_STEPS = 120;
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -98,27 +105,6 @@ export function detectShopeeCaptcha(root = document) {
   return false;
 }
 
-function dispatchKey(key, code, keyCode) {
-  const init = {
-    key,
-    code,
-    keyCode,
-    which: keyCode,
-    bubbles: true,
-    cancelable: true,
-    view: window,
-  };
-  for (const target of [
-    document.activeElement,
-    document.body,
-    document.documentElement,
-  ]) {
-    if (!target) continue;
-    target.dispatchEvent(new KeyboardEvent("keydown", init));
-    target.dispatchEvent(new KeyboardEvent("keyup", init));
-  }
-}
-
 function isAtPageBottom() {
   const maxScroll =
     Math.max(
@@ -128,35 +114,61 @@ function isAtPageBottom() {
   return window.scrollY >= maxScroll - 4;
 }
 
-/** PageDown — kèm scroll fallback (~ một viewport). */
-function pressPageDown() {
-  dispatchKey("PageDown", "PageDown", 34);
-  window.scrollBy({ top: window.innerHeight * 0.92, behavior: "instant" });
+function pageScrollHeight() {
+  return Math.max(
+    document.documentElement.scrollHeight,
+    document.body?.scrollHeight ?? 0,
+  );
 }
 
-async function navigateToKeywordSearch(keyword, navigateDelayMs, signal, skipNavigate) {
-  const settleMs = Math.max(Number(navigateDelayMs) || 0, KEYWORD_SETTLE_MS);
+function takeLazyLoadSnapshot() {
+  return {
+    count: countVisibleProductCards(),
+    scrollHeight: pageScrollHeight(),
+    atBottom: isAtPageBottom(),
+  };
+}
+
+/** Lazy-load xong: đáy trang + count & chiều cao trang ổn định (không cần đủ N SP). */
+function isLazyLoadSettled(snap, stableRounds) {
+  return snap.atBottom && stableRounds >= SCROLL_STABLE_ROUNDS;
+}
+
+function snapshotsMatch(a, b) {
+  return a.count === b.count && a.scrollHeight === b.scrollHeight;
+}
+
+function countVisibleProductCards() {
+  ingestPageIntoResearchTable();
+  return Math.max(
+    scrapeCurrentPage().similar.length,
+    findSimilarProductCards().length,
+  );
+}
+
+/** Cuộn từng bước nhỏ — không dùng phím PageDown (Shopee thường bỏ qua synthetic key). */
+function scrollStepDown() {
+  window.scrollBy({ top: SCROLL_STEP_PX, behavior: "instant" });
+}
+
+async function navigateToKeywordSearch(keyword, signal, skipNavigate) {
   if (skipNavigate) {
     if (!isOnKeywordSearchPage(keyword)) {
       throw new Error(
         `Tab search chưa đúng từ khóa «${keyword}» — đợi trang tải xong rồi thử lại`,
       );
     }
-    await sleep(settleMs, signal);
     return;
   }
   const targetUrl = buildKeywordSearchUrl(keyword);
   if (!isOnKeywordSearchPage(keyword)) {
     location.assign(targetUrl);
-    await sleep(settleMs, signal);
     try {
       await waitForElement(CARD_WAIT_SELECTORS, 20000);
     } catch {
-      /* pageDownToBottom sẽ thử tiếp */
+      /* loadSearchResultsByPageDown sẽ thử tiếp */
     }
-    return;
   }
-  await sleep(settleMs, signal);
 }
 
 async function waitForKeywordUrl(keyword, signal) {
@@ -174,45 +186,79 @@ async function waitForKeywordUrl(keyword, signal) {
   );
 }
 
-/** PageDown mỗi 500 ms tới cuối trang — tới cuối là xong, không chờ thêm. */
-async function pageDownToBottom(signal) {
+/**
+ * Cuộn ngay + theo dõi lazy-load (count + scrollHeight ổn định ở đáy).
+ * @returns {{ count: number, lazyLoadComplete: boolean }}
+ */
+async function scrollUntilLazyLoadComplete(signal, stepDelayMs) {
+  const intervalMs = Math.max(
+    Number(stepDelayMs) || PAGE_DOWN_INTERVAL_DEFAULT_MS,
+    200,
+  );
+  let stableRounds = 0;
+  /** @type {ReturnType<typeof takeLazyLoadSnapshot> | null} */
+  let lastSnap = null;
+
   window.scrollTo({ top: 0, behavior: "instant" });
 
   for (let step = 0; step < MAX_PAGE_DOWN_STEPS; step++) {
     signal?.throwIfAborted();
-    if (isAtPageBottom()) break;
 
-    pressPageDown();
-    await sleep(PAGE_DOWN_INTERVAL_MS, signal);
-    ingestPageIntoResearchTable();
+    const snap = takeLazyLoadSnapshot();
+
+    if (lastSnap && snapshotsMatch(snap, lastSnap) && snap.atBottom) {
+      stableRounds += 1;
+    }
+    else {
+      stableRounds = 0;
+    }
+
+    if (isLazyLoadSettled(snap, stableRounds)) {
+      ingestPageIntoResearchTable();
+      return { count: snap.count, lazyLoadComplete: true };
+    }
+
+    lastSnap = snap;
+
+    if (!snap.atBottom) {
+      scrollStepDown();
+      await sleep(intervalMs, signal);
+      continue;
+    }
+
+    await sleep(LAZY_LOAD_POLL_MS, signal);
+    const next = takeLazyLoadSnapshot();
+    if (
+      next.atBottom &&
+      snapshotsMatch(next, snap) &&
+      next.count <= snap.count
+    ) {
+      window.scrollBy({ top: -SCROLL_NUDGE_UP_PX, behavior: "instant" });
+      await sleep(150, signal);
+      scrollStepDown();
+    }
   }
 
   ingestPageIntoResearchTable();
+  return {
+    count: countVisibleProductCards(),
+    lazyLoadComplete: false,
+  };
 }
 
-/** Đợi 1 s → PageDown tới cuối trang → scrape ngay. */
-async function loadSearchResultsByPageDown(keyword, signal) {
+/** URL khớp từ khóa → cuộn ngay, lazy-load xong thì scrape. */
+async function loadSearchResultsByPageDown(keyword, signal, timing = {}) {
+  const postNavMs = Math.max(Number(timing.postNavMs) ?? KEYWORD_POST_NAV_MS, 0);
+  const scrollStepDelayMs = timing.scrollStepDelayMs;
   await waitForKeywordUrl(keyword, signal);
-  await sleep(KEYWORD_SETTLE_MS, signal);
+  if (postNavMs > 0)
+    await sleep(postNavMs, signal);
 
-  try {
-    await waitForElement(CARD_WAIT_SELECTORS, 8000);
-  } catch {
-    /* vẫn PageDown — có thể DOM chậm */
-  }
+  const scrollResult = await scrollUntilLazyLoadComplete(signal, scrollStepDelayMs);
+  if (!scrollResult.lazyLoadComplete && KEYWORD_POST_SCROLL_MS > 0)
+    await sleep(KEYWORD_POST_SCROLL_MS, signal);
 
-  await pageDownToBottom(signal);
-
-  const scraped = scrapeCurrentPage().similar.length;
-  const count = Math.max(scraped, findSimilarProductCards().length);
-
-  if (count <= MIN_SANITY_PRODUCTS) {
-    throw new Error(
-      `Chỉ thấy ${count} SP cho «${keyword}» — trang chưa tải đủ (cần > ${MIN_SANITY_PRODUCTS})`,
-    );
-  }
-
-  return count;
+  return countVisibleProductCards();
 }
 
 function filterByMinSold(rows, minSold) {
@@ -277,6 +323,7 @@ function resolveSourcePosition(tableRows, { sourceItemId, sourceTitle }) {
  *   sourceItemId?: string,
  *   sourceTitle?: string,
  *   navigateDelayMs?: number,
+ *   scrollStepDelayMs?: number,
  *   signal?: AbortSignal,
  *   skipNavigate?: boolean,
  * }} opts
@@ -288,10 +335,12 @@ export async function crawlKeywordSearch(opts) {
   }
 
   const settings = await getSettings();
-  const navigateDelayMs = Math.max(
-    opts.navigateDelayMs ?? settings.optimizeNavigateDelayMs ?? KEYWORD_SETTLE_MS,
-    KEYWORD_SETTLE_MS,
+  const postNavMs = Math.max(
+    Number(opts.navigateDelayMs ?? settings.optimizeNavigateDelayMs) ?? KEYWORD_POST_NAV_MS,
+    0,
   );
+  const scrollStepDelayMs =
+    opts.scrollStepDelayMs ?? settings.optimizeScrollStepDelayMs ?? PAGE_DOWN_INTERVAL_DEFAULT_MS;
   const minSold = opts.minSold ?? settings.optimizeMinSold ?? 1000;
   const maxCompetitors =
     opts.maxCompetitors ?? settings.optimizeMaxCompetitorsPerKeyword ?? 15;
@@ -301,7 +350,6 @@ export async function crawlKeywordSearch(opts) {
   try {
     await navigateToKeywordSearch(
       keyword,
-      navigateDelayMs,
       signal,
       opts.skipNavigate === true,
     );
@@ -310,7 +358,10 @@ export async function crawlKeywordSearch(opts) {
       return { status: "captcha", keyword, competitors: [], sourcePosition: null };
     }
 
-    await loadSearchResultsByPageDown(keyword, signal);
+    await loadSearchResultsByPageDown(keyword, signal, {
+      scrollStepDelayMs,
+      postNavMs,
+    });
 
     if (detectShopeeCaptcha()) {
       return { status: "captcha", keyword, competitors: [], sourcePosition: null };
@@ -330,11 +381,13 @@ export async function crawlKeywordSearch(opts) {
     const bySold = sortBySoldDesc(deduped);
     const top = limitTopBySold(bySold, maxCompetitors);
     const competitors = mapRowsToOptimizeSerp(top, keyword);
+    const competitorsUi = mapRowsToOptimizeUi(top, keyword);
 
     return {
       status: "ok",
       keyword,
       competitors,
+      competitorsUi,
       sourcePosition,
     };
   }
@@ -355,6 +408,7 @@ export async function handleShopeeSearchCrawl(payload, signal) {
     sourceItemId: payload?.sourceItemId,
     sourceTitle: payload?.sourceTitle,
     navigateDelayMs: payload?.navigateDelayMs,
+    scrollStepDelayMs: payload?.scrollStepDelayMs,
     skipNavigate: payload?.skipNavigate === true,
     signal,
   });

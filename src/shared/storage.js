@@ -278,10 +278,11 @@ export const DEFAULT_SETTINGS = {
   /** Prompt tùy chỉnh — để trống dùng mặc định trong optimize-prompts.js */
   optimizeKeywordPrompt: "",
   optimizeAnalysisPrompt: "",
-  optimizeNavigateDelayMs: 1000,
-  optimizeScrollStepDelayMs: 900,
-  optimizeBetweenKeywordDelayMs: 2000,
-  /** Mục tiêu SP trang 1 — đủ thì bỏ qua lần End/PageUp thứ hai */
+  optimizeNavigateDelayMs: 0,
+  optimizeScrollStepDelayMs: 500,
+  /** Thêm trễ giữa các từ khóa (ms) — mặc định 0 vì crawl đã chờ 1000ms sau PageDown */
+  optimizeBetweenKeywordDelayMs: 0,
+  /** Mục tiêu SP tối thiểu trên SERP trang 1 sau PageDown */
   optimizeMinProductCards: 50,
   pricingFormula: DEFAULT_PRICING_FORMULA,
   pricingVariables: { ...DEFAULT_PRICING_VARIABLES },

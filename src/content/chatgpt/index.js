@@ -1,10 +1,12 @@
 import { MessageType, replyAsync, safeSendResponse } from '../../shared/messaging.js';
 import { fillChatGPTComposer } from './composer.js';
+import { installGeneratedImageDownloadButtons } from './generated-image-download.js';
 
 const CHATGPT_SCRIPT_FLAG = '__bigsellerAiChatgptScript';
 if (!globalThis[CHATGPT_SCRIPT_FLAG]) {
     globalThis[CHATGPT_SCRIPT_FLAG] = true;
     registerChatGPTMessageListener();
+    installGeneratedImageDownloadButtons();
 }
 
 function registerChatGPTMessageListener() {

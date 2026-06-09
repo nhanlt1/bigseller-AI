@@ -1,10 +1,10 @@
 import { setGeminiLastResponseHash, } from '../../shared/storage.js';
-import { parseGeminiKeywordsJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
+import { parseGeminiKeywordsJson, parseGeminiOptimizeJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
 import { hashProductContent } from '../../shared/text-hash.js';
 import { queryFirst, setQuillText, waitForElement } from '../shared/dom-utils.js';
 import { GEMINI_INPUT_SELECTORS, GEMINI_SEND_SELECTORS } from './selectors.js';
 import { geminiDebugLog } from './gemini-debug-log.js';
-import { captureSendSnapshot, waitForNewStableResponse } from './response-tracker.js';
+import { cancelActiveGeminiWait, captureSendSnapshot, waitForNewStableResponse } from './response-tracker.js';
 function clickSend() {
     const btn = queryFirst(GEMINI_SEND_SELECTORS);
     if (!btn || btn.disabled)
@@ -38,10 +38,11 @@ export async function fillGeminiComposer(prompt) {
     editor.focus();
 }
 
-/** @typedef {'keywords' | 'product'} GeminiExpectedSchema */
+/** @typedef {'keywords' | 'product' | 'optimize'} GeminiExpectedSchema */
 
 export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDescription, expectedSchema = 'product') {
     try {
+        cancelActiveGeminiWait();
         geminiDebugLog('run', `requestId=${requestId} — bắt đầu runGeminiPrompt`, { expectedSchema });
         const editor = await waitForElement(GEMINI_INPUT_SELECTORS, 30000);
         if (!editor) {
@@ -60,11 +61,15 @@ export async function runGeminiPrompt(prompt, requestId, sourceTitle, sourceDesc
         const { text: responseText, hash: responseHash } = await waitForNewStableResponse(snapshot, 120000, expectedSchema);
         const parsed = expectedSchema === 'keywords'
             ? parseGeminiKeywordsJson(responseText)
-            : parseGeminiProductJson(responseText);
+            : expectedSchema === 'optimize'
+                ? parseGeminiOptimizeJson(responseText)
+                : parseGeminiProductJson(responseText);
         if (!parsed) {
             const schemaHint = expectedSchema === 'keywords'
                 ? '{"keywords":["..."]}'
-                : '{"title":"...","description":"..."}';
+                : expectedSchema === 'optimize'
+                    ? '{"title":"...","description":"...","suggestedPrice":89000}'
+                    : '{"title":"...","description":"..."}';
             return {
                 requestId,
                 text: responseText,

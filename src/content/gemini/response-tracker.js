@@ -1,5 +1,5 @@
 import { getGeminiLastResponseHash, } from '../../shared/storage.js';
-import { parseGeminiKeywordsJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
+import { parseGeminiKeywordsJson, parseGeminiOptimizeJson, parseGeminiProductJson, } from '../../shared/gemini-json.js';
 import { hashText } from '../../shared/text-hash.js';
 import { getModelResponseElements, getUserQueryElements, isGeminiGenerating } from './dom-query.js';
 import { buildBubbleRows, geminiDebugClearPanel, geminiDebugLog, geminiDebugTable, probeSelectorCounts, } from './gemini-debug-log.js';
@@ -46,7 +46,7 @@ function pickWatchBubble(nodes, snapshot) {
 function isExpectedModelBubble(picked, snapshot, currentHash) {
     if (!picked)
         return false;
-    if (picked.index === snapshot.modelCount)
+    if (picked.index >= snapshot.modelCount)
         return true;
     if (picked.inPlace &&
         picked.index === snapshot.modelCount - 1 &&
@@ -84,19 +84,24 @@ function verifyLatestUserBubble(snapshot) {
     }
     return { ok: true };
 }
-/** @typedef {'keywords' | 'product'} GeminiExpectedSchema */
+/** @typedef {'keywords' | 'product' | 'optimize'} GeminiExpectedSchema */
 
 function hasValidGeminiJson(text, expectedSchema = 'product') {
     if (expectedSchema === 'keywords') {
         return !!parseGeminiKeywordsJson(text);
     }
+    if (expectedSchema === 'optimize') {
+        return !!parseGeminiOptimizeJson(text);
+    }
     return !!parseGeminiProductJson(text);
 }
 
 function jsonSchemaLabel(expectedSchema) {
-    return expectedSchema === 'keywords'
-        ? 'JSON keywords'
-        : 'JSON title/description';
+    if (expectedSchema === 'keywords')
+        return 'JSON keywords';
+    if (expectedSchema === 'optimize')
+        return 'JSON title/description/suggestedPrice';
+    return 'JSON title/description';
 }
 function isStreamingSettled(stableStreak) {
     return stableStreak >= STABLE_POLLS_REQUIRED;
@@ -114,26 +119,26 @@ function scanForFreshResponse(scope, snapshot, expectedSchema) {
     const userCheck = verifyLatestUserBubble(snapshot);
     if (!userCheck.ok)
         return null;
-    const candidates = [];
-    if (nodes.length > snapshot.modelCount) {
-        candidates.push({ index: snapshot.modelCount, inPlace: false });
-    }
-    else if (nodes.length === snapshot.modelCount && nodes.length > 0) {
-        candidates.push({ index: nodes.length - 1, inPlace: true });
-    }
-    for (const { index, inPlace } of candidates) {
+    let best = null;
+    const tryIndex = (index, inPlace) => {
         const text = readBubbleText(nodes[index]);
         if (!text || !hasValidGeminiJson(text, expectedSchema))
-            continue;
+            return;
         const currentHash = hashText(text);
         if (!isNewResponseHash(currentHash, snapshot).ok)
-            continue;
+            return;
         const picked = { index, inPlace };
         if (!isExpectedModelBubble(picked, snapshot, currentHash))
-            continue;
-        return { text, index, hash: currentHash };
+            return;
+        best = { text, index, hash: currentHash };
+    };
+    for (let index = snapshot.modelCount; index < nodes.length; index++) {
+        tryIndex(index, false);
     }
-    return null;
+    if (!best && nodes.length === snapshot.modelCount && nodes.length > 0) {
+        tryIndex(nodes.length - 1, true);
+    }
+    return best;
 }
 function finish(resolve, text, index) {
     resolve({
@@ -374,7 +379,8 @@ export function waitForNewStableResponse(snapshot, timeoutMs = 120000, expectedS
             const isExpectedBubble = isExpectedModelBubble(picked, snapshot, currentHash);
             const settled =
                 isStreamingSettled(stableStreak) ||
-                (!generating && jsonOk && stableStreak >= 1);
+                (!generating && jsonOk && stableStreak >= 1) ||
+                (jsonOk && stableStreak >= 1 && picked.index >= snapshot.modelCount);
             const blockers = [];
             if (generating && !settled)
                 blockers.push('Gemini đang generate');

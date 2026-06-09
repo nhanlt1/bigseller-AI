@@ -1,6 +1,7 @@
 import {
     formatCommissionPercent,
     getBigsellerCategorySelectionEl,
+    getBigsellerCategoryTextEl,
     getCategoryFeeMeta,
     lookupCategoryCommission,
     readBigsellerProductCategoryPath,
@@ -69,6 +70,13 @@ function findBigsellerCategoryPositionEl() {
     return getBigsellerCategorySelectionEl(document);
 }
 
+function findBigsellerCategoryAnchor() {
+    const textEl = getBigsellerCategoryTextEl(document);
+    if (!textEl)
+        return null;
+    return textEl.parentElement ?? textEl;
+}
+
 function positionBigsellerBadge(badge, positionEl) {
     if (!positionEl?.isConnected) {
         badge.style.display = 'none';
@@ -121,11 +129,12 @@ function resolveCategoryContext() {
     }
     const bsPath = readBigsellerProductCategoryPath();
     if (bsPath) {
+        const textEl = getBigsellerCategoryTextEl(document);
         return {
             path: bsPath,
-            anchor: null,
+            anchor: textEl ? findBigsellerCategoryAnchor() : null,
             platform: 'bigseller',
-            positionEl: findBigsellerCategoryPositionEl(),
+            positionEl: textEl ? null : findBigsellerCategoryPositionEl(),
         };
     }
     return { path: '', anchor: null, platform: null, positionEl: null };
@@ -142,16 +151,21 @@ function renderBadge(ctx, lookup) {
     if (!pct) {
         badge.innerHTML =
             '<span class="bs-fee-label">Phí cố định:</span> <span class="bs-fee-pct">—</span>';
-        badge.title =
-            'Không tra được % từ biểu phí Shopee (23/05/2026). Chỉnh tay trong popup $.';
+        badge.title = ctx.path
+            ? `Không tra được % cho: ${ctx.path}\nChỉnh tay trong popup $.`
+            : 'Không tra được % từ biểu phí Shopee (23/05/2026). Chỉnh tay trong popup $.';
     }
     else {
         const matchNote =
-            lookup.match === 'fuzzy' || lookup.match === 'leaf-fuzzy'
+            lookup.match === 'fuzzy' ||
+            lookup.match === 'leaf-fuzzy' ||
+            /^prefix-fuzzy-\d+$/.test(lookup.match ?? '')
                 ? ' (ước lượng từ biểu phí)'
-                : lookup.match === 'l1-fallback'
-                  ? ' (theo ngành cấp 1)'
-                  : '';
+                : lookup.match?.startsWith('prefix-')
+                  ? ` (theo ${lookup.match.replace('prefix-', '')} cấp breadcrumb)`
+                  : lookup.match === 'l1-fallback'
+                    ? ' (theo ngành cấp 1)'
+                    : '';
         badge.innerHTML =
             `<span class="bs-fee-label">Phí cố định:</span> <span class="bs-fee-pct">${pct}</span>`;
         const meta = getCategoryFeeMeta();
@@ -167,6 +181,20 @@ function renderBadge(ctx, lookup) {
             positionBigsellerBadge(badge, findBigsellerCategoryPositionEl());
         });
         return;
+    }
+
+    if (ctx.platform === 'bigseller' && ctx.anchor) {
+        const textEl = getBigsellerCategoryTextEl(document);
+        badge.classList.remove(BADGE_FLOAT_CLASS);
+        badge.style.left = '';
+        badge.style.top = '';
+        badge.style.display = '';
+        badge.style.zIndex = '';
+        if (textEl) {
+            if (badge.previousElementSibling !== textEl)
+                textEl.insertAdjacentElement('afterend', badge);
+            return;
+        }
     }
 
     badge.classList.remove(BADGE_FLOAT_CLASS);
@@ -217,7 +245,7 @@ export function updateProductCategoryFeeBadge() {
         return;
     if (ctx.platform === 'shopee' && !ctx.anchor)
         return;
-    if (ctx.platform === 'bigseller' && !ctx.positionEl)
+    if (ctx.platform === 'bigseller' && !ctx.positionEl && !ctx.anchor)
         return;
     ensureStyles();
     const lookup = lookupCategoryCommission(ctx.path);

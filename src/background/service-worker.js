@@ -2,7 +2,11 @@ import { openChatGPTWithImagePrompt } from './chatgpt-tab.js';
 import { ensureTabReady, sendTabMessageReady } from './tab-messenger.js';
 import { withServiceWorkerKeepalive } from './keepalive.js';
 import { MessageType, replyAsync, safeSendResponse, sendTabMessage, } from '../shared/messaging.js';
-import { parseGeminiKeywordsJson } from '../shared/gemini-json.js';
+import { parseGeminiKeywordsJson, parseGeminiOptimizeJson } from '../shared/gemini-json.js';
+import {
+    alignSuggestedPriceWithSerp,
+    inferSuggestedPriceFromCrawl,
+} from '../shared/optimize-serp-columns.js';
 import { buildAnalysisPrompt, buildKeywordPrompt } from '../shared/optimize-prompts.js';
 import { sanitizeRewrittenProduct } from '../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, mergeRewriteByScope, parseGeminiProductJson, } from '../shared/storage.js';
@@ -16,6 +20,17 @@ function createRequestId() {
 }
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
+}
+async function focusTab(tabId) {
+    if (tabId == null)
+        return false;
+    try {
+        await chrome.tabs.update(tabId, { active: true });
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 async function waitForTabComplete(tabId, timeoutMs = 25000) {
     const tab = await chrome.tabs.get(tabId);
@@ -153,6 +168,10 @@ async function handleRewriteProduct(payload, senderTabId) {
             error: err instanceof Error ? err.message : String(err),
         };
     }
+    finally {
+        if (senderTabId != null)
+            await focusTab(senderTabId);
+    }
 }
 /** @type {{
  *   runId: string,
@@ -161,6 +180,13 @@ async function handleRewriteProduct(payload, senderTabId) {
  *   cancelled: boolean,
  *   waitingCaptcha: boolean,
  *   resumeResolve: (() => void) | null,
+ *   requestId: string,
+ *   keywords: string[],
+ *   crawlResults: Array<Record<string, unknown>>,
+ *   product: Record<string, unknown> | null,
+ *   pricing: Record<string, unknown> | null,
+ *   waitingManualResolve: ((text: string) => void) | null,
+ *   finished: boolean,
  * } | null} */
 let optimizeState = null;
 
@@ -188,8 +214,264 @@ async function sendOptimizeProgress(sellerTabId, payload) {
     }
 }
 
+async function sendOptimizeResult(sellerTabId, payload) {
+    if (sellerTabId == null)
+        return false;
+    try {
+        await chrome.tabs.sendMessage(sellerTabId, {
+            type: MessageType.OPTIMIZE_RESULT,
+            payload,
+        });
+        return true;
+    }
+    catch {
+        await sendOptimizeProgress(sellerTabId, {
+            error: 'Không mở được sidebar kết quả — F5 trang sửa SP, reload extension, rồi thử lại',
+        });
+        return false;
+    }
+}
+
 function clearOptimizeState() {
     optimizeState = null;
+}
+
+async function cancelGeminiWaitInTab() {
+    const tabs = await chrome.tabs.query({
+        url: 'https://gemini.google.com/*',
+    });
+    if (tabs[0]?.id == null)
+        return;
+    try {
+        await sendTabMessage(tabs[0].id, {
+            type: MessageType.GEMINI_CANCEL,
+        });
+    }
+    catch {
+        /* tab chưa có script */
+    }
+}
+
+/**
+ * @param {Promise<{ text?: string }>} geminiPromise
+ */
+function waitForManualClipboardOrGemini(geminiPromise) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const done = (value) => {
+            if (settled)
+                return;
+            settled = true;
+            if (optimizeState)
+                optimizeState.waitingManualResolve = null;
+            resolve(value);
+        };
+        const fail = (err) => {
+            if (settled)
+                return;
+            settled = true;
+            if (optimizeState)
+                optimizeState.waitingManualResolve = null;
+            reject(err);
+        };
+        if (optimizeState) {
+            optimizeState.waitingManualResolve = (text) => {
+                done({ text, fromManual: true });
+            };
+        }
+        geminiPromise.then(done).catch(fail);
+    });
+}
+
+function buildOptimizeResultData(parsedOptimize, product, crawlResults, minSellPrice) {
+    const sanitized = sanitizeRewrittenProduct(parsedOptimize, product.shopName);
+    let geminiMissingPrice = parsedOptimize.suggestedPrice == null;
+    let priceInferredFromSerp = false;
+    let priceAlignedToTopSeller = false;
+    let suggestedPrice = parsedOptimize.suggestedPrice ?? null;
+    if (suggestedPrice == null) {
+        const inferred = inferSuggestedPriceFromCrawl(crawlResults, minSellPrice);
+        if (inferred != null) {
+            suggestedPrice = inferred;
+            priceInferredFromSerp = true;
+        }
+    }
+    else {
+        const aligned = alignSuggestedPriceWithSerp(suggestedPrice, crawlResults, minSellPrice);
+        if (aligned.price != null && aligned.price !== suggestedPrice) {
+            suggestedPrice = aligned.price;
+            priceAlignedToTopSeller = aligned.alignedFromTopSeller;
+        }
+        else if (aligned.price != null) {
+            suggestedPrice = aligned.price;
+        }
+    }
+    let priceClamped = false;
+    if (minSellPrice != null && suggestedPrice != null && suggestedPrice < minSellPrice) {
+        suggestedPrice = minSellPrice;
+        priceClamped = true;
+    }
+    return {
+        title: sanitized.title,
+        description: sanitized.description,
+        suggestedPrice,
+        priceClamped,
+        priceInferredFromSerp,
+        priceAlignedToTopSeller,
+        geminiMissingPrice,
+    };
+}
+
+async function deliverOptimizeFromParsed(parsedOptimize, state) {
+    const product = state.product;
+    const pricing = state.pricing ?? {};
+    const costPerUnit = pricing.costPerUnit ?? null;
+    const minSellPrice = pricing.minSellPrice ?? null;
+    const costSkipped = pricing.costSkipped === true;
+    const profitTargetPerUnit = Number(pricing.profitTargetPerUnit) || 0;
+    const result = buildOptimizeResultData(parsedOptimize, product, state.crawlResults, minSellPrice);
+    const delivered = await sendOptimizeResult(state.sellerTabId, {
+        requestId: state.requestId,
+        keywords: state.keywords,
+        crawlResults: state.crawlResults,
+        pricing: {
+            costPerUnit,
+            minSellPrice,
+            costSkipped,
+            profitTargetPerUnit,
+        },
+        result,
+        original: {
+            title: product.title,
+            description: product.description,
+            shopName: product.shopName,
+            itemId: product.itemId,
+            shopId: product.shopId,
+        },
+    });
+    if (!delivered)
+        throw new Error('Không gửi được kết quả tới tab sửa SP');
+    await sendOptimizeProgress(state.sellerTabId, {
+        text: 'Hoàn tất — mở sidebar xem kết quả',
+        done: true,
+    });
+    await focusTab(state.sellerTabId);
+    state.finished = true;
+    return result;
+}
+
+async function handleOptimizePasteFromGemini(payload, sellerTabId) {
+    const parsed = parseGeminiOptimizeJson(payload?.geminiText ?? '');
+    if (!parsed) {
+        return {
+            ok: false,
+            error: 'Clipboard không có JSON {title, description, suggestedPrice?} hợp lệ',
+        };
+    }
+    if (sellerTabId == null) {
+        return { ok: false, error: 'Không xác định được tab sửa sản phẩm' };
+    }
+
+    const costSkipped = payload.costSkipped === true;
+    const costPerUnit = costSkipped ? null : (Number(payload.costPerUnit) || null);
+    const minSellPrice = costSkipped ? null : (Number(payload.minSellPrice) || null);
+    const profitTargetPerUnit = Number(payload.profitTargetPerUnit) || 0;
+    const product = {
+        title: payload.title ?? '',
+        description: payload.description ?? '',
+        shopName: payload.shopName ?? '',
+        itemId: String(payload.itemId ?? '').trim(),
+        shopId: String(payload.shopId ?? '').trim(),
+        platform: payload.platform ?? 'shopee',
+    };
+
+    /** @type {unknown[]} */
+    let crawlResults = [];
+    if (
+        optimizeState?.sellerTabId === sellerTabId &&
+        Array.isArray(optimizeState.crawlResults) &&
+        optimizeState.crawlResults.length
+    ) {
+        crawlResults = optimizeState.crawlResults;
+    }
+    else if (Array.isArray(payload.sessionCrawlResults) && payload.sessionCrawlResults.length) {
+        crawlResults = payload.sessionCrawlResults;
+    }
+
+    const keywordsFromCrawl = crawlResults
+        .map((chunk) => String(chunk?.keyword ?? '').trim())
+        .filter(Boolean);
+    const keywords = keywordsFromCrawl.length
+        ? keywordsFromCrawl
+        : (Array.isArray(payload.sessionKeywords) ? payload.sessionKeywords : []);
+
+    const requestId = payload.requestId ?? createRequestId();
+    const state = {
+        sellerTabId,
+        requestId,
+        product,
+        crawlResults,
+        keywords,
+        pricing: {
+            costPerUnit,
+            minSellPrice,
+            costSkipped,
+            profitTargetPerUnit,
+        },
+        finished: false,
+        cancelled: false,
+    };
+
+    if (optimizeState && !optimizeState.finished) {
+        optimizeState.cancelled = true;
+        optimizeState.waitingManualResolve = null;
+        optimizeState.resumeResolve?.();
+        optimizeState.resumeResolve = null;
+    }
+
+    try {
+        await deliverOptimizeFromParsed(parsed, state);
+        return { ok: true };
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: msg };
+    }
+    finally {
+        if (sellerTabId != null)
+            await focusTab(sellerTabId);
+        clearOptimizeState();
+    }
+}
+
+async function handleOptimizeManualClipboard(text, sellerTabId) {
+    const state = optimizeState;
+    if (!state || state.sellerTabId !== sellerTabId) {
+        return { ok: false, error: 'Không có pipeline tối ưu đang chạy' };
+    }
+    if (!state.crawlResults?.length) {
+        return {
+            ok: false,
+            error: 'Chưa crawl SERP — chờ đến bước «Đang phân tích đối thủ với Gemini» rồi thử lại',
+        };
+    }
+    const parsed = parseGeminiOptimizeJson(text);
+    if (!parsed) {
+        return {
+            ok: false,
+            error: 'Clipboard không có JSON {title, description, suggestedPrice?} hợp lệ — copy lại từ Gemini',
+        };
+    }
+    await cancelGeminiWaitInTab();
+    if (state.waitingManualResolve) {
+        state.waitingManualResolve(JSON.stringify(parsed));
+        return { ok: true };
+    }
+    if (state.finished)
+        return { ok: true };
+    await deliverOptimizeFromParsed(parsed, state);
+    state.cancelled = true;
+    return { ok: true };
 }
 
 function isOptimizeCancelled() {
@@ -259,13 +541,12 @@ function searchTabKeyword(tabUrl) {
     }
 }
 
-async function navigateSearchTabToKeyword(searchTabId, keyword, navigateDelayMs) {
+async function navigateSearchTabToKeyword(searchTabId, keyword) {
     const tab = await chrome.tabs.get(searchTabId);
     const want = normalizeTitleKey(keyword);
     const current = normalizeTitleKey(searchTabKeyword(tab.url));
     const onSearch = /shopee\.vn\/search/i.test(tab.url ?? '');
     if (onSearch && current === want) {
-        await sleep(Math.max(navigateDelayMs, 1000));
         await ensureTabReady(searchTabId, 'shopee');
         return;
     }
@@ -274,11 +555,10 @@ async function navigateSearchTabToKeyword(searchTabId, keyword, navigateDelayMs)
         active: true,
     });
     await waitForTabComplete(searchTabId, 35000);
-    await sleep(Math.max(navigateDelayMs, 1000));
     await ensureTabReady(searchTabId, 'shopee');
 }
 
-async function sendGeminiSchemaPrompt({ prompt, requestId, title, description, expectedSchema }) {
+async function sendGeminiSchemaPrompt({ prompt, requestId, title, description, expectedSchema, returnTabId }) {
     const geminiTabId = await openGeminiTabIfNeeded();
     await ensureTabReady(geminiTabId, 'gemini');
     const response = await sendTabMessageReady(geminiTabId, 'gemini', {
@@ -291,6 +571,8 @@ async function sendGeminiSchemaPrompt({ prompt, requestId, title, description, e
             expectedSchema,
         },
     });
+    if (returnTabId != null)
+        await focusTab(returnTabId);
     if (response?.error)
         throw new Error(response.error);
     return response;
@@ -331,10 +613,21 @@ async function handleOptimizeProduct(payload, sellerTabId) {
         cancelled: false,
         waitingCaptcha: false,
         resumeResolve: null,
+        requestId,
+        keywords: [],
+        crawlResults: [],
+        product: null,
+        pricing: null,
+        waitingManualResolve: null,
+        finished: false,
     };
 
     const startedAt = Date.now();
     const settings = await getSettings();
+    const costSkipped = payload.costSkipped === true;
+    const costPerUnit = costSkipped ? null : (Number(payload.costPerUnit) || null);
+    const minSellPrice = costSkipped ? null : (Number(payload.minSellPrice) || null);
+    const profitTargetPerUnit = Number(payload.profitTargetPerUnit) || 0;
     const product = {
         title: payload.title ?? '',
         description: payload.description ?? '',
@@ -343,7 +636,20 @@ async function handleOptimizeProduct(payload, sellerTabId) {
         itemId: String(payload.itemId ?? '').trim(),
         shopId: String(payload.shopId ?? '').trim(),
         platform: payload.platform ?? 'shopee',
+        costPerUnit,
+        minSellPrice,
+        profitTargetPerUnit,
+        costSkipped,
     };
+    if (optimizeState) {
+        optimizeState.product = product;
+        optimizeState.pricing = {
+            costPerUnit,
+            minSellPrice,
+            costSkipped,
+            profitTargetPerUnit,
+        };
+    }
 
     try {
         await sendOptimizeProgress(sellerTabId, { text: 'Đang hỏi Gemini từ khóa…' });
@@ -355,6 +661,7 @@ async function handleOptimizeProduct(payload, sellerTabId) {
             title: product.title,
             description: product.description,
             expectedSchema: 'keywords',
+            returnTabId: sellerTabId,
         });
         if (isOptimizeCancelled())
             return { requestId, ok: false, error: 'Đã hủy pipeline' };
@@ -370,6 +677,8 @@ async function handleOptimizeProduct(payload, sellerTabId) {
 
         const maxKeywords = Math.max(1, Number(settings.optimizeMaxKeywords) || 8);
         const keywords = parsedKeywords.keywords.slice(0, maxKeywords);
+        if (optimizeState)
+            optimizeState.keywords = keywords;
         const crawlResults = [];
 
         const searchTabId = await openOrReuseSearchTab();
@@ -401,15 +710,10 @@ async function handleOptimizeProduct(payload, sellerTabId) {
                     sourceTitle: product.title,
                     navigateDelayMs: settings.optimizeNavigateDelayMs,
                     scrollStepDelayMs: settings.optimizeScrollStepDelayMs,
-                    minProductCards: settings.optimizeMinProductCards,
                 };
 
                 try {
-                    await navigateSearchTabToKeyword(
-                        searchTabId,
-                        keyword,
-                        Math.max(Number(settings.optimizeNavigateDelayMs) || 1000, 1000),
-                    );
+                    await navigateSearchTabToKeyword(searchTabId, keyword);
                     const response = await crawlKeywordOnSearchTab(searchTabId, {
                         ...crawlPayload,
                         skipNavigate: true,
@@ -434,6 +738,7 @@ async function handleOptimizeProduct(payload, sellerTabId) {
                     chunk = {
                         keyword: response.keyword ?? keyword,
                         competitors: response.competitors ?? [],
+                        competitorsUi: response.competitorsUi ?? response.competitors ?? [],
                         sourcePosition: response.sourcePosition ?? null,
                     };
                 }
@@ -445,6 +750,7 @@ async function handleOptimizeProduct(payload, sellerTabId) {
                     chunk = {
                         keyword,
                         competitors: [],
+                        competitorsUi: [],
                         sourcePosition: null,
                         error: msg,
                     };
@@ -452,6 +758,8 @@ async function handleOptimizeProduct(payload, sellerTabId) {
             }
 
             crawlResults.push(chunk);
+            if (optimizeState)
+                optimizeState.crawlResults = crawlResults;
             const count = chunk.competitors?.length ?? 0;
             const pos = chunk.sourcePosition;
             const posText = !pos || pos.empty
@@ -465,10 +773,11 @@ async function handleOptimizeProduct(payload, sellerTabId) {
 
             if (i < keywords.length - 1) {
                 const betweenDelay = Math.max(
-                    Number(settings.optimizeBetweenKeywordDelayMs) || 2000,
-                    1000,
+                    Number(settings.optimizeBetweenKeywordDelayMs) || 0,
+                    0,
                 );
-                await sleep(betweenDelay);
+                if (betweenDelay > 0)
+                    await sleep(betweenDelay);
             }
         }
 
@@ -493,32 +802,28 @@ async function handleOptimizeProduct(payload, sellerTabId) {
             ...product,
             crawlResults,
         }, settings);
-        const analysisResponse = await sendGeminiSchemaPrompt({
+        const analysisResponse = await waitForManualClipboardOrGemini(sendGeminiSchemaPrompt({
             prompt: analysisPrompt,
             requestId: `${requestId}_analysis`,
             title: product.title,
             description: product.description,
-            expectedSchema: 'product',
-        });
+            expectedSchema: 'optimize',
+            returnTabId: sellerTabId,
+        }));
         if (isOptimizeCancelled())
             return { requestId, ok: false, error: 'Đã hủy pipeline' };
 
-        const parsedProduct = parseGeminiProductJson(analysisResponse.text ?? '');
-        if (!parsedProduct) {
+        const parsedOptimize = parseGeminiOptimizeJson(analysisResponse.text ?? '');
+        if (!parsedOptimize) {
             return {
                 requestId,
                 ok: false,
-                error: 'Gemini không trả JSON {title, description} hợp lệ',
+                error: 'Gemini không trả JSON {title, description, suggestedPrice} hợp lệ',
             };
         }
 
-        const data = sanitizeRewrittenProduct(parsedProduct, product.shopName);
-        await applyToSellerTab(sellerTabId, data);
-        await sendOptimizeProgress(sellerTabId, {
-            text: 'Đã áp dụng tiêu đề và mô tả mới vào form',
-            done: true,
-        });
-        return { requestId, ok: true, data };
+        const result = await deliverOptimizeFromParsed(parsedOptimize, optimizeState);
+        return { requestId, ok: true, data: result };
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -526,6 +831,8 @@ async function handleOptimizeProduct(payload, sellerTabId) {
         return { requestId, ok: false, error: msg };
     }
     finally {
+        if (sellerTabId != null)
+            await focusTab(sellerTabId);
         clearOptimizeState();
     }
 }
@@ -617,11 +924,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return { ok: true };
         });
     }
+    if (message.type === MessageType.OPTIMIZE_MANUAL_CLIPBOARD) {
+        const text = message.payload?.text;
+        if (!text?.trim()) {
+            safeSendResponse(sendResponse, { ok: false, error: 'Thiếu nội dung clipboard' });
+            return false;
+        }
+        return replyAsync(sendResponse, () => handleOptimizeManualClipboard(text.trim(), sender.tab?.id));
+    }
+    if (message.type === MessageType.OPTIMIZE_PASTE_GEMINI) {
+        const payload = message.payload;
+        if (!payload?.geminiText?.trim()) {
+            safeSendResponse(sendResponse, { ok: false, error: 'Thiếu JSON Gemini' });
+            return false;
+        }
+        return replyAsync(sendResponse, () => withServiceWorkerKeepalive(() =>
+            handleOptimizePasteFromGemini(payload, sender.tab?.id)));
+    }
     if (message.type === MessageType.OPTIMIZE_CANCEL) {
         return replyAsync(sendResponse, async () => {
             if (optimizeState) {
                 optimizeState.cancelled = true;
                 optimizeState.waitingCaptcha = false;
+                optimizeState.waitingManualResolve = null;
                 optimizeState.resumeResolve?.();
                 optimizeState.resumeResolve = null;
                 if (optimizeState.searchTabId != null) {

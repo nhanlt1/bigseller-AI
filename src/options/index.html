@@ -108,7 +108,7 @@
 
             <label>
 
-              Delay sau navigate (ms)
+              Chờ sau từ khóa trước PageDown (ms, mặc định 1500)
 
               <input type="number" id="optimizeNavigateDelayMs" min="500" step="100" />
 
@@ -116,7 +116,7 @@
 
             <label>
 
-              Delay mỗi bước scroll (ms)
+              Delay mỗi lần PageDown (ms)
 
               <input type="number" id="optimizeScrollStepDelayMs" min="200" step="100" />
 
@@ -124,15 +124,15 @@
 
             <label>
 
-              Delay giữa các từ khóa (ms)
+              Delay thêm giữa các từ khóa (ms, crawl đã chờ 1000ms sau PageDown)
 
-              <input type="number" id="optimizeBetweenKeywordDelayMs" min="500" step="100" />
+              <input type="number" id="optimizeBetweenKeywordDelayMs" min="0" step="100" />
 
             </label>
 
             <label>
 
-              Mục tiêu SP trang 1 (End/PageUp — đủ thì bỏ retry)
+              Mục tiêu SP tối thiểu trên SERP trang 1
 
               <input type="number" id="optimizeMinProductCards" min="10" max="80" step="1" />
 
@@ -151,6 +151,8 @@
           <label>
 
             Prompt phân tích (Gemini bước 2)
+
+            <p class="hint">Đầu ra JSON: <code>{"title","description","suggestedPrice"}</code>. Placeholder <code>{serpPricingHintBlock}</code> (giá SP bán chạy SERP), <code>{pricingContextBlock}</code> (giá vốn / sàn tối thiểu).</p>
 
             <textarea id="optimizeAnalysisPrompt" rows="10"></textarea>
 

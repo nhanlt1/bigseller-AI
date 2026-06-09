@@ -1,6 +1,10 @@
 import { bigsellerAdapter } from './adapter.js';
 import { listenForProductApply } from '../shared/apply-listener.js';
 import { mountOptimizeProgressListener } from '../shared/optimize-progress.js';
+import {
+    mountOptimizeResultListener,
+    mountOptimizeReviewSidebar,
+} from '../shared/optimize-review-sidebar.js';
 import { observeDomChanges } from '../shared/dom-utils.js';
 import { mountImageFab, refreshImageToolbar, IMAGE_TOOLBAR_ID } from '../shared/image-fab.js';
 import {
@@ -17,6 +21,8 @@ import {
 
 listenForProductApply(bigsellerAdapter);
 mountOptimizeProgressListener();
+mountOptimizeResultListener();
+mountOptimizeReviewSidebar(bigsellerAdapter);
 
 let editorPanel = null;
 

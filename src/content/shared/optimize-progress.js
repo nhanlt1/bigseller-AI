@@ -61,8 +61,15 @@ const OVERLAY_CSS = `
   .actions {
     display: flex;
     gap: 8px;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     flex-wrap: wrap;
+  }
+  .right-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-left: auto;
   }
   .btn {
     padding: 8px 14px;
@@ -99,7 +106,7 @@ const OVERLAY_CSS = `
 let host = null;
 /** @type {ShadowRoot | null} */
 let shadow = null;
-/** @type {{ onCancel?: () => void, onResume?: () => void, onDone?: () => void, onError?: (message: string) => void }} */
+/** @type {{ onCancel?: () => void, onResume?: () => void, onManualClipboard?: () => void, onDone?: () => void, onError?: (message: string) => void }} */
 let callbacks = {};
 /** @type {((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) => boolean) | null} */
 let messageListener = null;
@@ -120,8 +127,11 @@ function ensureHost() {
           Shopee yêu cầu xác minh — giải CAPTCHA trên tab tìm kiếm, rồi bấm <strong>Tiếp tục</strong>.
         </p>
         <div class="actions">
-          <button type="button" class="btn" id="optimize-cancel">Hủy</button>
-          <button type="button" class="btn primary resume" id="optimize-resume">Tiếp tục</button>
+          <button type="button" class="btn manual" id="optimize-manual" title="Copy JSON từ tab Gemini rồi bấm">Nhận dữ liệu thủ công</button>
+          <div class="right-actions">
+            <button type="button" class="btn" id="optimize-cancel">Hủy</button>
+            <button type="button" class="btn primary resume" id="optimize-resume">Tiếp tục</button>
+          </div>
         </div>
       </div>`;
     shadow.getElementById('optimize-cancel')?.addEventListener('click', () => {
@@ -129,6 +139,9 @@ function ensureHost() {
     });
     shadow.getElementById('optimize-resume')?.addEventListener('click', () => {
         callbacks.onResume?.();
+    });
+    shadow.getElementById('optimize-manual')?.addEventListener('click', () => {
+        callbacks.onManualClipboard?.();
     });
     document.body.appendChild(host);
 }
@@ -174,7 +187,7 @@ export function isOptimizeProgressVisible() {
 }
 
 /**
- * @param {{ onCancel?: () => void, onResume?: () => void }} next
+ * @param {{ onCancel?: () => void, onResume?: () => void, onManualClipboard?: () => void }} next
  */
 export function setOptimizeProgressCallbacks(next) {
     callbacks = { ...next };
