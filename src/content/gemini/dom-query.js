@@ -64,3 +64,50 @@ export function isGeminiGenerating() {
     }
     return false;
 }
+/** `el` nằm sau `anchor` trong cây document (kể cả shadow DOM). */
+export function followsInDocument(anchor, el) {
+    if (!anchor || !el || anchor === el)
+        return false;
+    return (anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+function compareDocumentOrder(a, b) {
+    if (a === b)
+        return 0;
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING)
+        return -1;
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING)
+        return 1;
+    const topDiff = a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+    if (Math.abs(topDiff) > 1)
+        return topDiff < 0 ? -1 : 1;
+    return 0;
+}
+/** Bubble model đầu tiên xuất hiện sau `afterEl` theo thứ tự document. */
+export function getFirstModelResponseAfter(scope, afterEl) {
+    if (!afterEl)
+        return null;
+    const models = getModelResponseElements(scope);
+    const following = models.filter((m) => followsInDocument(afterEl, m));
+    if (following.length === 0)
+        return null;
+    following.sort(compareDocumentOrder);
+    return following[0];
+}
+/**
+ * Neo theo user bubble mới nhất sau Send.
+ * @returns {{ userEl: Element, modelEl: Element | null, modelIndex: number } | null}
+ */
+export function resolveWatchBubbleAfterUser(scope, userCount) {
+    const users = getUserQueryElements(scope);
+    if (users.length <= userCount)
+        return null;
+    const userEl = users[users.length - 1];
+    const modelEl = getFirstModelResponseAfter(scope, userEl);
+    if (!modelEl) {
+        return { userEl, modelEl: null, modelIndex: -1 };
+    }
+    const models = getModelResponseElements(scope);
+    const modelIndex = models.indexOf(modelEl);
+    return { userEl, modelEl, modelIndex };
+}
