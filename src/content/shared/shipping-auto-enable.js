@@ -155,23 +155,20 @@ function findBigsellerShippingCard(root = document) {
     return null;
 }
 
-/** Neo căn vị trí BigSeller — text «Phí vận chuyển» */
+/** Neo căn vị trí BigSeller — khối bảng ĐVVC `.w_full.border_ddd.p_10` */
 function findBigsellerAnchor() {
     const card = findBigsellerShippingCard();
     if (!card)
         return null;
-    const candidates = card.querySelectorAll(
-        '.title, .com_card_head, h3, h4, label, span, div',
-    );
-    for (const el of candidates) {
-        const t = el.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-        if (!/ph[ií]\s*vận\s*chuyển/i.test(t))
-            continue;
-        if (t.length > 80)
-            continue;
-        if (!isVisible(el))
-            continue;
-        return el;
+    const box =
+        card.querySelector('.w_full.border_ddd.p_10') ??
+        card.querySelector('.border_ddd.p_10') ??
+        card.querySelector('.w_full.border_ddd');
+    if (box?.querySelector('table.in_table') && isVisible(box))
+        return box;
+    for (const el of card.querySelectorAll('[class*="border_ddd"]')) {
+        if (el.querySelector('table.in_table') && isVisible(el))
+            return el;
     }
     const body = card.querySelector('.com_card_body');
     return body && isVisible(body) ? body : null;
@@ -212,7 +209,10 @@ function positionFloatingHost(host, platform) {
     const hostW = host.offsetWidth || HOST_WIDTH_EST;
     host.style.display = 'inline-flex';
     if (platform === 'bigseller') {
-        host.style.top = `${r.bottom + 6}px`;
+        const gap = 6;
+        let top = r.top - hostH - gap;
+        top = Math.max(8, top);
+        host.style.top = `${top}px`;
         host.style.left = `${r.left}px`;
         host.style.right = 'auto';
     }
