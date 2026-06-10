@@ -24,6 +24,11 @@ import {
 } from '../shared/shop-in-shop-search.js';
 import { mountProductSaveShortcut } from '../shared/product-save-shortcut.js';
 import {
+    mountShippingAutoToggle,
+    refreshShippingAutoEnable,
+    SHIPPING_AUTO_HOST_ID,
+} from '../shared/shipping-auto-enable.js';
+import {
     mountSimilarProductsResearch,
     scheduleAutoCollect,
 } from './similar-products-research.js';
@@ -92,6 +97,7 @@ function initProductEditor() {
         return;
     mountProductCategoryFeeBadge();
     mountShopInShopSearch('shopee');
+    mountShippingAutoToggle('shopee');
     mountImageFab(shopeeAdapter);
     if (!editorPanel)
         editorPanel = new FloatingPanel(shopeeAdapter);
@@ -135,6 +141,9 @@ observeDomChanges(() => {
         return;
     if (!document.getElementById(SHOP_SEARCH_HOST_ID))
         mountShopInShopSearch('shopee');
+    if (!document.getElementById(SHIPPING_AUTO_HOST_ID))
+        mountShippingAutoToggle('shopee');
+    refreshShippingAutoEnable('shopee');
     if (
         !document.getElementById(IMAGE_TOOLBAR_ID) ||
         !document.getElementById(DESC_TOOLBAR_ID)
