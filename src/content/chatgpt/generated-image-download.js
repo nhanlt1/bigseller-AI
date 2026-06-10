@@ -1,6 +1,8 @@
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
-/** Kích thước ảnh tải về cố định */
-const OUTPUT_SIZE_PX = 1234;
+/** Ảnh 1:1 — thu nhỏ tối đa tới kích thước này (không phóng to) */
+const SQUARE_TARGET_PX = 1234;
+const SQUARE_ASPECT_TOLERANCE = 0.01;
+const MIN_OUTPUT_EDGE_PX = 64;
 const MAX_BUTTON_IMAGES = 5;
 /** Khoảng cách nút tải bên phải, ngoài mép ảnh */
 const BUTTON_OUTSIDE_GAP_PX = 8;
@@ -308,7 +310,9 @@ function decodeSrc(src) {
 
 function blobFromImageElement(img, quality = 1) {
     return new Promise((resolve, reject) => {
-        const canvas = createOutputCanvasFromImage(img);
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+        const canvas = createOutputCanvasFromSource(img, srcW, srcH);
         canvas.toBlob(
             (blob) => {
                 if (blob)
@@ -322,48 +326,85 @@ function blobFromImageElement(img, quality = 1) {
     });
 }
 
-function createOutputCanvasFromImage(img) {
+function isNearlySquare(width, height) {
+    const max = Math.max(width, height);
+    if (max <= 0)
+        return false;
+    return Math.abs(width - height) / max <= SQUARE_ASPECT_TOLERANCE;
+}
+
+/**
+ * Chỉ thu nhỏ — không phóng to.
+ * 1:1 → tối đa 1234×1234; tỉ lệ khác → giữ nguyên pixel gốc.
+ */
+function computeOutputDimensions(srcW, srcH) {
+    const width = Math.max(1, Math.round(srcW));
+    const height = Math.max(1, Math.round(srcH));
+    if (isNearlySquare(width, height)) {
+        const size = Math.min(width, height, SQUARE_TARGET_PX);
+        return { width: size, height: size };
+    }
+    return { width, height };
+}
+
+function scaleDimensionsDown(width, height, factor) {
+    let nextW = Math.max(MIN_OUTPUT_EDGE_PX, Math.floor(width * factor));
+    let nextH = Math.max(MIN_OUTPUT_EDGE_PX, Math.floor(height * factor));
+    if (isNearlySquare(width, height)) {
+        const size = Math.min(nextW, nextH);
+        nextW = size;
+        nextH = size;
+    }
+    return { width: nextW, height: nextH };
+}
+
+function createOutputCanvasFromSource(source, width, height) {
     const canvas = document.createElement('canvas');
-    canvas.width = OUTPUT_SIZE_PX;
-    canvas.height = OUTPUT_SIZE_PX;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx)
         throw new Error('Canvas không khả dụng');
-    ctx.drawImage(img, 0, 0, OUTPUT_SIZE_PX, OUTPUT_SIZE_PX);
+    ctx.drawImage(source, 0, 0, width, height);
     return canvas;
 }
 
-function createOutputCanvasFromBitmap(bitmap) {
-    const canvas = document.createElement('canvas');
-    canvas.width = OUTPUT_SIZE_PX;
-    canvas.height = OUTPUT_SIZE_PX;
-    const ctx = canvas.getContext('2d');
-    if (!ctx)
-        throw new Error('Canvas không khả dụng');
-    ctx.drawImage(bitmap, 0, 0, OUTPUT_SIZE_PX, OUTPUT_SIZE_PX);
-    return canvas;
+function createOutputCanvasFromBitmap(bitmap, width, height) {
+    return createOutputCanvasFromSource(bitmap, width, height);
 }
 
-/** Resize 1234×1234, chất lượng JPEG cao nhất nhưng ≤ 2 MB. */
+/** Giữ tỉ lệ, chỉ thu nhỏ; JPEG chất lượng cao nhất nhưng ≤ 2 MB. */
 async function prepareDownloadBlob(blob) {
     const bitmap = await createImageBitmap(blob);
     try {
-        return await encodeFixedSizeNearMax(bitmap);
+        let { width, height } = computeOutputDimensions(bitmap.width, bitmap.height);
+        let encoded = await encodeCanvasUnderMaxBytes(bitmap, width, height);
+        if (encoded)
+            return encoded;
+
+        while (width > MIN_OUTPUT_EDGE_PX || height > MIN_OUTPUT_EDGE_PX) {
+            ({ width, height } = scaleDimensionsDown(width, height, 0.85));
+            encoded = await encodeCanvasUnderMaxBytes(bitmap, width, height);
+            if (encoded)
+                return encoded;
+        }
+
+        throw new Error('Không nén được ảnh dưới 2 MB');
     }
     finally {
         bitmap.close();
     }
 }
 
-async function encodeFixedSizeNearMax(bitmap) {
-    const canvas = createOutputCanvasFromBitmap(bitmap);
+async function encodeCanvasUnderMaxBytes(bitmap, width, height) {
+    const canvas = createOutputCanvasFromBitmap(bitmap, width, height);
 
     let lo = 0.5;
     let hi = 1;
     /** @type {Blob | null} */
     let best = null;
 
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 12; i++) {
         const quality = (lo + hi) / 2;
         const candidate = await canvasToBlob(canvas, 'image/jpeg', quality);
         if (candidate.size <= MAX_DOWNLOAD_BYTES) {
@@ -381,7 +422,7 @@ async function encodeFixedSizeNearMax(bitmap) {
     const fallback = await canvasToBlob(canvas, 'image/jpeg', lo);
     if (fallback.size <= MAX_DOWNLOAD_BYTES)
         return fallback;
-    throw new Error('Không nén được ảnh 1234×1234 dưới 2 MB');
+    return null;
 }
 
 function canvasToBlob(canvas, type, quality) {
