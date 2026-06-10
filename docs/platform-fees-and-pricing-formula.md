@@ -85,7 +85,7 @@ Ví dụ **Sở thích & Sưu tầm > Quà Lưu Niệm > Móc khóa**: **16%** (
 
 Extension đọc danh mục trên **Shopee** (`.product-category-text`) hoặc **BigSeller** (cascade `ant-select` trong `.page_edit_item`), hiển thị **Phí cố định: …%** (đỏ) cạnh danh mục và tự điền % vào popup **$** / `platformFeeConfig.commissionRate`. BigSeller chỉ hiện tên lá (vd `Bút Chì`) vẫn tra được qua so khớp mờ với biểu phí.
 
-Tái tạo JSON: `node scripts/parse-shopee-category-fees.mjs` (sau khi cập nhật `.firecrawl/shopee-fee-pdf.md`).
+Tái tạo `src/pricing/data/shopee-category-fees.data.js` (file duy nhất, nhóm theo %, kèm trường không dấu `a1/a2/a3`): `node scripts/parse-shopee-category-fees.mjs` (sau khi cập nhật `.firecrawl/shopee-fee-pdf.md`).
 
 ## 8. Extension
 

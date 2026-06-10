@@ -19,6 +19,11 @@ import { observeDomChanges } from '../shared/dom-utils.js';
 import { isShopeeOrderDetailUrl, mountOrderDetailCheck } from './order-detail-check.js';
 import { mountProductCategoryFeeBadge, updateProductCategoryFeeBadge, } from '../shared/product-category-fee.js';
 import {
+    mountShopInShopSearch,
+    SHOP_SEARCH_HOST_ID,
+} from '../shared/shop-in-shop-search.js';
+import { mountProductSaveShortcut } from '../shared/product-save-shortcut.js';
+import {
     mountSimilarProductsResearch,
     scheduleAutoCollect,
 } from './similar-products-research.js';
@@ -86,6 +91,7 @@ function initProductEditor() {
     if (!shopeeAdapter.extract())
         return;
     mountProductCategoryFeeBadge();
+    mountShopInShopSearch('shopee');
     mountImageFab(shopeeAdapter);
     if (!editorPanel)
         editorPanel = new FloatingPanel(shopeeAdapter);
@@ -94,6 +100,7 @@ function initProductEditor() {
 
 function initSellerCenterExtras() {
     mountOrderDetailCheck();
+    mountProductSaveShortcut('shopee');
     if (isShopeeOrderDetailUrl())
         return;
     initProductEditor();
@@ -126,6 +133,8 @@ observeDomChanges(() => {
     updateProductCategoryFeeBadge();
     if (isShopeeOrderDetailUrl())
         return;
+    if (!document.getElementById(SHOP_SEARCH_HOST_ID))
+        mountShopInShopSearch('shopee');
     if (
         !document.getElementById(IMAGE_TOOLBAR_ID) ||
         !document.getElementById(DESC_TOOLBAR_ID)

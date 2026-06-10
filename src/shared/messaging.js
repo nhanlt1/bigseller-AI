@@ -35,6 +35,8 @@ export const MessageType = {
     OPTIMIZE_MANUAL_CLIPBOARD: 'OPTIMIZE_MANUAL_CLIPBOARD',
     /** Edit tab → SW: dán kết quả Gemini từ popup giá vốn (pipeline lỗi / bỏ qua crawl) */
     OPTIMIZE_PASTE_GEMINI: 'OPTIMIZE_PASTE_GEMINI',
+    /** Edit tab → SW: mở / focus tab shopee.vn/search?shop=… theo từ khóa */
+    OPEN_SHOPEE_SHOP_SEARCH: 'OPEN_SHOPEE_SHOP_SEARCH',
 };
 /** Gọi sendResponse an toàn — tránh lỗi khi channel đã đóng */
 export function safeSendResponse(sendResponse, payload) {

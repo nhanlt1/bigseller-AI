@@ -1,35 +1,7 @@
 import feeData from './data/shopee-category-fees.data.js';
+import { normalizeCategoryText } from './category-normalize.js';
 
-/** Sửa lỗi OCR phổ biến từ PDF biểu phí Shopee */
-const OCR_TOKEN_FIXES = [
-    [/\bthick\b/g, 'thich'],
-    [/\bsuur\b/g, 'suu'],
-    [/\bsuu\s*tam\b/g, 'suu tam'],
-    [/\bluru\b/g, 'luu'],
-    [/\bluru\s*niem\b/g, 'luu niem'],
-    [/\bniêm\b/g, 'niem'],
-    [/\bmagy\b/g, 'may'],
-    [/\bdiên\b/g, 'dien'],
-    [/\bthoaai\b/g, 'thoai'],
-];
-
-/** Bỏ dấu + lowercase để so khớp OCR/PDF lệch chữ */
-export function normalizeCategoryText(value) {
-    if (!value)
-        return '';
-    let s = value
-        .normalize('NFD')
-        .replace(/\p{M}/gu, '')
-        .replace(/đ/g, 'd')
-        .replace(/Đ/g, 'D')
-        .toLowerCase()
-        .replace(/&/g, ' & ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    for (const [re, rep] of OCR_TOKEN_FIXES)
-        s = s.replace(re, rep);
-    return s.replace(/\s+/g, ' ').trim();
-}
+export { normalizeCategoryText };
 
 function levenshtein(a, b) {
     if (a === b)
@@ -52,9 +24,10 @@ function levenshtein(a, b) {
     return row[b.length];
 }
 
-function similarity(a, b) {
-    const na = normalizeCategoryText(a);
-    const nb = normalizeCategoryText(b);
+/** So khớp phần tử user (raw) với trường không dấu đã tính sẵn trong data (a1/a2/a3) */
+function similarityToNorm(rawUser, normRow) {
+    const na = normalizeCategoryText(rawUser);
+    const nb = normRow ?? '';
     if (!na || !nb)
         return 0;
     if (na === nb)
@@ -101,11 +74,16 @@ function rowKey(parts) {
     return parts.map(normalizeCategoryText).join('|');
 }
 
+/** Trường không dấu tính sẵn trong data: a1/a2/a3 */
+function rowNormParts(row) {
+    return [row.a1, row.a2, row.a3].filter(Boolean);
+}
+
 function buildIndex(rows) {
     const byPath = new Map();
     for (const row of rows) {
-        const parts = [row.cat1, row.cat2, row.cat3].filter(Boolean);
-        const key = rowKey(parts);
+        const parts = rowNormParts(row);
+        const key = parts.join('|');
         if (!key)
             continue;
         const existing = byPath.get(key);
@@ -121,13 +99,13 @@ const pathIndex = buildIndex(feeData.rows);
 function fuzzyLookup(parts) {
     let best = null;
     for (const row of feeData.rows) {
-        const rParts = [row.cat1, row.cat2, row.cat3].filter(Boolean);
+        const rParts = rowNormParts(row);
         if (rParts.length !== parts.length)
             continue;
         let score = 0;
         let ok = true;
         for (let i = 0; i < parts.length; i++) {
-            const sim = similarity(parts[i], rParts[i]);
+            const sim = similarityToNorm(parts[i], rParts[i]);
             if (sim < FUZZY_MIN) {
                 ok = false;
                 break;
@@ -147,6 +125,7 @@ function fuzzyLookup(parts) {
 function lookupL1Fallback(parts) {
     const n1 = normalizeCategoryText(parts[0] ?? '');
     for (const fb of feeData.l1Fallbacks) {
+        // fb.match đã là chữ không dấu (sinh sẵn trong data)
         if (n1.includes(fb.match))
             return { rate: fb.rate, ratePct: fb.rate * 100, match: 'l1-fallback' };
     }
@@ -199,8 +178,8 @@ function lookupLeafFuzzy(parts) {
         return null;
     let best = null;
     for (const row of feeData.rows) {
-        for (const field of [row.cat3, row.cat2].filter(Boolean)) {
-            const sim = similarity(leaf, field);
+        for (const field of [row.a3, row.a2].filter(Boolean)) {
+            const sim = similarityToNorm(leaf, field);
             if (sim < FUZZY_MIN)
                 continue;
             if (!best || sim > best.score) {

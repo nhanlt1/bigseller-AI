@@ -8,6 +8,11 @@ import {
     inferSuggestedPriceFromCrawl,
 } from '../shared/optimize-serp-columns.js';
 import { buildAnalysisPrompt, buildKeywordPrompt } from '../shared/optimize-prompts.js';
+import {
+    buildShopeeShopSearchUrl,
+    DTL_SHOP_SEARCH_ID,
+    tabHasShopSearchParam,
+} from '../shared/shopee-shop-search.js';
 import { sanitizeRewrittenProduct } from '../shared/shop-names.js';
 import { fillPromptTemplate, getSettings, mergeRewriteByScope, parseGeminiProductJson, } from '../shared/storage.js';
 
@@ -31,6 +36,26 @@ async function focusTab(tabId) {
     catch {
         return false;
     }
+}
+
+async function openOrReuseShopSearchTab(keyword, shopId = DTL_SHOP_SEARCH_ID) {
+    const k = String(keyword ?? '').trim();
+    if (!k)
+        throw new Error('Thiếu từ khóa tìm kiếm');
+    const id = String(shopId ?? DTL_SHOP_SEARCH_ID).trim();
+    const url = buildShopeeShopSearchUrl(k, id);
+    const tabs = await chrome.tabs.query({
+        url: ['https://shopee.vn/*', 'https://*.shopee.vn/*'],
+    });
+    const existing = tabs.find((t) => tabHasShopSearchParam(t.url, id));
+    if (existing?.id != null) {
+        await chrome.tabs.update(existing.id, { url, active: true });
+        return { ok: true, tabId: existing.id, reused: true };
+    }
+    const tab = await chrome.tabs.create({ url, active: true });
+    if (tab.id == null)
+        throw new Error('Không mở được tab Shopee');
+    return { ok: true, tabId: tab.id, reused: false };
 }
 async function waitForTabComplete(tabId, timeoutMs = 25000) {
     const tab = await chrome.tabs.get(tabId);
@@ -940,6 +965,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return replyAsync(sendResponse, () => withServiceWorkerKeepalive(() =>
             handleOptimizePasteFromGemini(payload, sender.tab?.id)));
+    }
+    if (message.type === MessageType.OPEN_SHOPEE_SHOP_SEARCH) {
+        const keyword = message.payload?.keyword;
+        const shopId = message.payload?.shopId ?? DTL_SHOP_SEARCH_ID;
+        if (!String(keyword ?? '').trim()) {
+            safeSendResponse(sendResponse, { ok: false, error: 'Thiếu từ khóa' });
+            return false;
+        }
+        return replyAsync(sendResponse, () => withServiceWorkerKeepalive(() =>
+            openOrReuseShopSearchTab(keyword, shopId)));
     }
     if (message.type === MessageType.OPTIMIZE_CANCEL) {
         return replyAsync(sendResponse, async () => {

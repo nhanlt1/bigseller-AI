@@ -5,11 +5,11 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fixCategoryFeeRows, serializeFeeData } from './fix-shopee-category-fees-ocr.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const input = path.join(root, '.firecrawl', 'shopee-fee-pdf.md');
-const outputJson = path.join(root, 'src', 'pricing', 'data', 'shopee-category-fees.json');
 const outputJs = path.join(root, 'src', 'pricing', 'data', 'shopee-category-fees.data.js');
 
 const md = fs.readFileSync(input, 'utf8');
@@ -53,6 +53,10 @@ const l1Fallbacks = [
     { match: 'ô tô', rate: 0.035 },
 ];
 
+const { rows: fixedRows, report } = fixCategoryFeeRows(rows);
+console.log(`OCR fix: ${report.changed}/${report.total} rows changed, ` +
+    `${report.suspiciousRemaining} suspicious remaining`);
+
 const meta = {
     sourceUrl: 'https://banhang.shopee.vn/edu/article/27540',
     pdfUrl:
@@ -60,11 +64,10 @@ const meta = {
     effectiveFrom: '2026-05-23',
     sellerType: 'non-mall',
     parsedAt: new Date().toISOString().slice(0, 10),
-    rowCount: rows.length,
+    ocrFixedAt: new Date().toISOString().slice(0, 10),
+    rowCount: fixedRows.length,
 };
 
-const payload = { meta, rows, l1Fallbacks };
-fs.mkdirSync(path.dirname(outputJson), { recursive: true });
-fs.writeFileSync(outputJson, JSON.stringify(payload, null, 0), 'utf8');
-fs.writeFileSync(outputJs, `export default ${JSON.stringify(payload)};\n`, 'utf8');
-console.log(`Wrote ${rows.length} rows → ${outputJson} + ${outputJs}`);
+fs.mkdirSync(path.dirname(outputJs), { recursive: true });
+fs.writeFileSync(outputJs, serializeFeeData({ meta, rows: fixedRows, l1Fallbacks }), 'utf8');
+console.log(`Wrote ${fixedRows.length} rows → ${outputJs}`);

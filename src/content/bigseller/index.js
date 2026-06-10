@@ -18,6 +18,11 @@ import {
     mountProductCategoryFeeBadge,
     updateProductCategoryFeeBadge,
 } from '../shared/product-category-fee.js';
+import {
+    mountShopInShopSearch,
+    SHOP_SEARCH_HOST_ID,
+} from '../shared/shop-in-shop-search.js';
+import { mountProductSaveShortcut } from '../shared/product-save-shortcut.js';
 
 listenForProductApply(bigsellerAdapter);
 mountOptimizeProgressListener();
@@ -38,9 +43,12 @@ function mountEditorToolbars() {
 function init() {
     if (!bigsellerAdapter.canHandle(location.href))
         return;
+    mountProductSaveShortcut('bigseller');
     mountPricingFab();
-    if (document.querySelector('.page_edit'))
+    if (document.querySelector('.page_edit')) {
         mountProductCategoryFeeBadge();
+        mountShopInShopSearch('bigseller');
+    }
     mountEditorToolbars();
 }
 
@@ -51,8 +59,11 @@ else {
     init();
 }
 observeDomChanges(() => {
-    if (document.querySelector('.page_edit'))
+    if (document.querySelector('.page_edit')) {
         updateProductCategoryFeeBadge();
+        if (!document.getElementById(SHOP_SEARCH_HOST_ID))
+            mountShopInShopSearch('bigseller');
+    }
     if (
         !document.getElementById(IMAGE_TOOLBAR_ID) ||
         !document.getElementById(DESC_TOOLBAR_ID) ||
