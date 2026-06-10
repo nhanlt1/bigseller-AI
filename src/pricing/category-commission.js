@@ -74,9 +74,9 @@ function rowKey(parts) {
     return parts.map(normalizeCategoryText).join('|');
 }
 
-/** Trường không dấu tính sẵn trong data: a1/a2/a3 */
+/** cat1/cat2/cat3 trong data đã là chữ không dấu + lowercase */
 function rowNormParts(row) {
-    return [row.a1, row.a2, row.a3].filter(Boolean);
+    return [row.cat1, row.cat2, row.cat3].filter(Boolean);
 }
 
 function buildIndex(rows) {
@@ -178,7 +178,7 @@ function lookupLeafFuzzy(parts) {
         return null;
     let best = null;
     for (const row of feeData.rows) {
-        for (const field of [row.a3, row.a2].filter(Boolean)) {
+        for (const field of [row.cat3, row.cat2].filter(Boolean)) {
             const sim = similarityToNorm(leaf, field);
             if (sim < FUZZY_MIN)
                 continue;
