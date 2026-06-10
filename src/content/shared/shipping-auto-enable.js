@@ -12,6 +12,7 @@ const DEFAULT_ENABLED = true;
 let enabledCache = null;
 let applyTimer = null;
 let applying = false;
+let bigsellerApplyPass = 0;
 let positionListenersBound = false;
 
 function ensureStyles() {
@@ -130,8 +131,11 @@ function isVisible(el) {
     return r.width > 0 && r.height > 0;
 }
 
-/** Card vận chuyển BigSeller: com_card có bảng checkbox in_table */
+/** Card vận chuyển BigSeller: data-anchor shippingInfo hoặc bảng in_table */
 function findBigsellerShippingCard(root = document) {
+    const byAnchor = root.querySelector('.com_card[data-anchor="shippingInfo"]');
+    if (byAnchor)
+        return byAnchor;
     const page = root.querySelector('.page_edit');
     if (!page)
         return null;
@@ -144,7 +148,12 @@ function findBigsellerShippingCard(root = document) {
             card.querySelector('.com_card_head') ??
             card.querySelector('h3, h4');
         const headText = head?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-        if (/ph[ií]\s*vận\s*chuyển/i.test(headText))
+        if (/vận\s*chuyển/i.test(headText))
+            return card;
+    }
+    for (const card of page.querySelectorAll('.com_card')) {
+        const table = card.querySelector('table.in_table');
+        if (table?.querySelector('[autoid^="shipping_method_button_"]'))
             return card;
     }
     for (const card of page.querySelectorAll('.com_card')) {
@@ -171,7 +180,10 @@ function findBigsellerAnchor() {
             return el;
     }
     const body = card.querySelector('.com_card_body');
-    return body && isVisible(body) ? body : null;
+    if (body && isVisible(body))
+        return body;
+    const head = card.querySelector('.com_card_head');
+    return head && isVisible(head) ? head : null;
 }
 
 /** Neo căn vị trí Shopee — hàng «Lấy hàng chủ động» (.service-type) */
@@ -283,16 +295,57 @@ function bindHost(host, platform) {
     });
 }
 
+function isAntCheckboxChecked(input) {
+    if (!input || input.disabled)
+        return true;
+    if (input.checked)
+        return true;
+    const wrap = input.closest('.ant-checkbox-wrapper');
+    if (wrap?.classList.contains('ant-checkbox-wrapper-checked'))
+        return true;
+    const inner = input.closest('.ant-checkbox');
+    if (inner?.classList.contains('ant-checkbox-checked'))
+        return true;
+    return false;
+}
+
 function clickAntCheckbox(input) {
-    if (!input || input.disabled || input.checked)
-        return;
-    const label = input.closest('label.ant-checkbox-wrapper') ??
+    if (!input || input.disabled || isAntCheckboxChecked(input))
+        return false;
+    const inner = input.closest('span.ant-checkbox');
+    const label =
+        input.closest('label.ant-checkbox-wrapper') ??
+        input.closest('label.custom_box_style') ??
         input.closest('label');
-    if (label) {
+    if (inner instanceof HTMLElement) {
+        inner.click();
+        return true;
+    }
+    if (label instanceof HTMLElement) {
         label.click();
-        return;
+        return true;
     }
     input.click();
+    return true;
+}
+
+/** Khối bảng ĐVVC — `.w_full.border_ddd.p_10` trong card Vận chuyển */
+function findBigsellerShippingScopes(card) {
+    const boxes = card.querySelectorAll(
+        '.w_full.border_ddd.p_10, .border_ddd.p_10, .w_full.border_ddd',
+    );
+    const scopes = [...boxes].filter((el) => el.querySelector('table.in_table'));
+    return scopes.length ? scopes : [card];
+}
+
+function hasUncheckedBigsellerShipping(card) {
+    for (const scope of findBigsellerShippingScopes(card)) {
+        for (const input of scope.querySelectorAll('table.in_table input.ant-checkbox-input')) {
+            if (!isAntCheckboxChecked(input))
+                return true;
+        }
+    }
+    return false;
 }
 
 function clickEdsSwitch(sw) {
@@ -307,10 +360,21 @@ function clickEdsSwitch(sw) {
 function applyBigsellerShipping() {
     const card = findBigsellerShippingCard();
     if (!card)
-        return;
-    const inputs = card.querySelectorAll('table.in_table input.ant-checkbox-input');
-    for (const input of inputs)
-        clickAntCheckbox(input);
+        return false;
+    let changed = false;
+    for (const scope of findBigsellerShippingScopes(card)) {
+        for (const table of scope.querySelectorAll('table.in_table')) {
+            for (const input of table.querySelectorAll('thead input.ant-checkbox-input'))
+                changed = clickAntCheckbox(input) || changed;
+            for (const input of table.querySelectorAll('tbody input.ant-checkbox-input'))
+                changed = clickAntCheckbox(input) || changed;
+        }
+    }
+    for (const input of card.querySelectorAll(
+        '[autoid^="shipping_method_button_"] input.ant-checkbox-input',
+    ))
+        changed = clickAntCheckbox(input) || changed;
+    return changed;
 }
 
 function applyShopeeShipping() {
@@ -339,10 +403,22 @@ export async function applyAutoShipping(platform) {
         if (!on || applying)
             return;
         applying = true;
-        if (platform === 'bigseller')
+        if (platform === 'bigseller') {
             applyBigsellerShipping();
-        else
+            const card = findBigsellerShippingCard();
+            if (card && hasUncheckedBigsellerShipping(card) && bigsellerApplyPass < 4) {
+                bigsellerApplyPass += 1;
+                setTimeout(() => {
+                    applying = false;
+                    void applyAutoShipping('bigseller');
+                }, 250);
+                return;
+            }
+            bigsellerApplyPass = 0;
+        }
+        else {
             applyShopeeShipping();
+        }
     }
     catch {
         /* selector/DOM lỗi — im lặng, không làm chết observer chung */
@@ -378,7 +454,8 @@ export function mountShippingAutoToggle(platform) {
         if (platform === 'shopee' &&
             !document.querySelector('.product-shipping, [class*="product-shipping"]'))
             return;
-        if (!getAnchor(platform))
+        if (!getAnchor(platform) && platform === 'bigseller' &&
+            !findBigsellerShippingCard())
             return;
         ensureStyles();
         const host = createHost(platform);

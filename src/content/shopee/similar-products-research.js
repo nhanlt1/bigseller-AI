@@ -1,5 +1,5 @@
 import { MessageType, sendMessage } from '../../shared/messaging.js';
-import { isSiblingShopId, SIBLING_SHOPEE_SHOPS } from '../../shared/shop-names.js';
+import { isKnownResearchShopId, resolveResearchShopMeta } from '../../shared/shop-names.js';
 import { copyTableToClipboard, downloadCsv } from '../../shared/table-export.js';
 import { FAB_IMAGE_RIGHT_PX, FAB_ROW_BOTTOM_PX, FAB_SIZE_PX } from '../shared/panel.js';
 import {
@@ -15,6 +15,7 @@ import {
     saveMyProductTitlesList,
 } from './similar-products-my-titles.js';
 import { focusProductCardForRow } from './similar-products-card-focus.js';
+import { markOwnedShopCardsOnPage } from './similar-products-owned-card-mark.js';
 import { resolveMyProductDisplayPosition } from './similar-products-title-position.js';
 import {
     RESEARCH_EXPORT_COLUMNS,
@@ -215,6 +216,7 @@ export function installSimilarProductsCardWatch() {
         pending = true;
         requestAnimationFrame(() => {
             pending = false;
+            markOwnedShopCardsOnPage();
             scheduleAutoCollect();
         });
     });
@@ -302,6 +304,7 @@ export function autoIngestCurrentPage() {
     ensureResearchSession();
     if (!isSimilarPageReady())
         return { added: 0, total: researchStore.rows.length };
+    markOwnedShopCardsOnPage();
     const page = detectShopeeCurrentPage();
     if (lastIngestPage != null && lastIngestPage !== page)
         lastAutoIngestFingerprint = '';
@@ -629,8 +632,8 @@ class SimilarResearchPanel {
 
     async onTableSiblingTitleClick(rowIndex) {
         const row = this.rows[rowIndex];
-        if (!row || !isSiblingShopId(row.shopId)) {
-            this.setStatus('Chỉ bấm được tên SP thuộc shop cùng hệ.');
+        if (!row || !isKnownResearchShopId(row.shopId)) {
+            this.setStatus('Chỉ bấm được tên SP thuộc shop đã nhận diện.');
             return;
         }
         const result = focusProductCardForRow(row);
@@ -936,9 +939,11 @@ class SimilarResearchPanel {
                 const rowClasses = [];
                 if (row.kind === 'Chính')
                     rowClasses.push('row-main');
-                const siblingRow = isSiblingShopId(row.shopId);
-                if (siblingRow)
-                    rowClasses.push('row-sibling-shop');
+                const shopMeta = resolveResearchShopMeta(row.shopId);
+                if (shopMeta?.kind === 'owned')
+                    rowClasses.push('row-owned-shop');
+                else if (shopMeta?.kind === 'reference')
+                    rowClasses.push('row-reference-shop');
                 const classAttr = rowClasses.length
                     ? ` class="${rowClasses.join(' ')}"`
                     : '';
@@ -949,11 +954,8 @@ class SimilarResearchPanel {
                     if (c.key === 'productUrl' && v) {
                         text = `<a href="${escapeAttr(v)}" target="_blank" rel="noopener">Mở</a>`;
                     }
-                    else if (c.key === 'title' && siblingRow && v) {
-                        text = `<div class="title-nav-cell">
-              <button type="button" class="title-nav-btn" data-row-index="${rowIndex}" title="Bấm để cuộn tới SP trên trang Shopee">${escapeHtml(v)}</button>
-              <button type="button" class="title-copy-btn" data-row-index="${rowIndex}" title="Copy tên SP" aria-label="Copy tên SP">Copy</button>
-            </div>`;
+                    else if (c.key === 'title' && row.title) {
+                        text = renderTitleCell(row, rowIndex);
                     }
                     else {
                         text = escapeHtml(v);
@@ -1008,6 +1010,34 @@ function escapeHtml(s) {
 
 function escapeAttr(s) {
     return escapeHtml(s).replace(/'/g, '&#39;');
+}
+
+function renderShopLabel(shopMeta) {
+    const kind = shopMeta.kind === 'reference' ? 'reference' : 'owned';
+    return `<div class="shop-label shop-label--${kind}">${escapeHtml(shopMeta.brand)}</div>`;
+}
+
+function renderTitleCell(row, rowIndex) {
+    const title = String(row.title ?? '').trim();
+    if (!title)
+        return '';
+    const shopMeta = resolveResearchShopMeta(row.shopId);
+    const shopHtml = shopMeta ? renderShopLabel(shopMeta) : '';
+    const navRow = isKnownResearchShopId(row.shopId);
+    if (navRow) {
+        return `<div class="title-cell-stack">
+              <div class="title-nav-cell">
+                <button type="button" class="title-nav-btn" data-row-index="${rowIndex}" title="Bấm để cuộn tới SP trên trang Shopee">${escapeHtml(title)}</button>
+                <button type="button" class="title-copy-btn" data-row-index="${rowIndex}" title="Copy tên SP" aria-label="Copy tên SP">Copy</button>
+              </div>${shopHtml}
+            </div>`;
+    }
+    if (shopHtml) {
+        return `<div class="title-cell-stack">
+              <span class="title-text">${escapeHtml(title)}</span>${shopHtml}
+            </div>`;
+    }
+    return escapeHtml(title);
 }
 
 function getPanel() {
@@ -1411,11 +1441,56 @@ const PANEL_STYLES = `
     background: #eff6ff;
     font-weight: 600;
   }
-  .data-table tr.row-sibling-shop td {
-    background: #ecfdf5;
+  .data-table tr.row-owned-shop td {
+    background: #fdf2f8;
+    border-bottom: 2px solid #f472b6 !important;
   }
-  .data-table tr.row-sibling-shop.row-main td {
+  .data-table tr.row-owned-shop td:first-child {
+    border-left: 3px solid #ec4899 !important;
+  }
+  .data-table tr.row-owned-shop td:last-child {
+    border-right: 3px solid #ec4899 !important;
+  }
+  .data-table tr.row-owned-shop.row-main td {
+    background: #fce7f3;
+    border-top: 3px solid #ec4899 !important;
+  }
+  .data-table tr.row-reference-shop td {
     background: #dbeafe;
+    border-bottom: 2px solid #93c5fd !important;
+  }
+  .data-table tr.row-reference-shop td:first-child {
+    border-left: 3px solid #3b82f6 !important;
+  }
+  .data-table tr.row-reference-shop td:last-child {
+    border-right: 3px solid #3b82f6 !important;
+  }
+  .data-table tr.row-reference-shop.row-main td {
+    background: #bfdbfe;
+    border-top: 3px solid #3b82f6 !important;
+  }
+  .title-cell-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+  }
+  .title-cell-stack .title-text {
+    display: block;
+    line-height: inherit;
+  }
+  .shop-label {
+    font-size: 10px;
+    line-height: 1.35;
+    font-weight: 600;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+  }
+  .shop-label--owned {
+    color: #be185d;
+  }
+  .shop-label--reference {
+    color: #1d4ed8;
   }
   .title-nav-cell {
     display: flex;

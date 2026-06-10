@@ -26,6 +26,7 @@ import { mountProductSaveShortcut } from '../shared/product-save-shortcut.js';
 import {
     mountShippingAutoToggle,
     refreshShippingAutoEnable,
+    scheduleApply,
     SHIPPING_AUTO_HOST_ID,
 } from '../shared/shipping-auto-enable.js';
 
@@ -54,6 +55,7 @@ function init() {
         mountProductCategoryFeeBadge();
         mountShopInShopSearch('bigseller');
         mountShippingAutoToggle('bigseller');
+        scheduleApply('bigseller');
     }
     mountEditorToolbars();
 }

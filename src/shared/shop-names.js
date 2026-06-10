@@ -6,6 +6,7 @@ import {
   SHOPEE_DESCRIPTION_MAX_LENGTH,
   SHOPEE_TITLE_TARGET_MAX_LENGTH,
 } from "./storage.js";
+import { DTL_SHOP_SEARCH_ID } from "./shopee-shop-search.js";
 
 /** Shopee: class subaccount-name — id → tên thương hiệu trong mô tả */
 export const SHOPEE_SHOP_ID_TO_BRAND = {
@@ -27,9 +28,30 @@ export const SIBLING_SHOPEE_SHOPS = [
   },
 ];
 
+/** Shop tham khảo giá cùng công ty (không phải shop user quản lý) */
+export const DTL_REFERENCE_SHOP = {
+  shopId: DTL_SHOP_SEARCH_ID,
+  brand: "Văn phòng phẩm ĐẠI THÀNH LỢI",
+};
+
 const SIBLING_SHOP_BY_NUMERIC_ID = Object.fromEntries(
   SIBLING_SHOPEE_SHOPS.map((s) => [s.shopId, s]),
 );
+
+/** @returns {{ shopId: string, brand: string, kind: 'owned' | 'reference', account?: string } | null} */
+export function resolveResearchShopMeta(shopId) {
+  const id = String(shopId ?? "").trim();
+  if (id === DTL_REFERENCE_SHOP.shopId)
+    return { ...DTL_REFERENCE_SHOP, kind: "reference" };
+  const sibling = SIBLING_SHOP_BY_NUMERIC_ID[id];
+  if (sibling)
+    return { shopId: sibling.shopId, brand: sibling.brand, account: sibling.account, kind: "owned" };
+  return null;
+}
+
+export function isKnownResearchShopId(shopId) {
+  return resolveResearchShopMeta(shopId) !== null;
+}
 
 export function isSiblingShopId(shopId) {
   const id = String(shopId ?? "").trim();

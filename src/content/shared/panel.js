@@ -434,7 +434,7 @@ export function mountProductDescriptionToolbar(panel, platform) {
         buttons: [
             {
                 id: 'optimize',
-                label: 'Tự động tối ưu',
+                label: 'Phân tích giá thị trường',
                 primary: true,
                 onClick: () => panel.optimizeProduct(),
             },
