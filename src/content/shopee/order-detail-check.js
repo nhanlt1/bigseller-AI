@@ -5,6 +5,7 @@ import {
   computeExtensionSettlement,
   expectedValueForRow,
   extractIncomeLabel,
+  parseOrderProductLines,
   parseVndText,
   resolveIncomeRowRole,
   resolveRowRole,
@@ -252,7 +253,9 @@ async function copyReconciliationToClipboard(btn) {
     return;
   }
   const settings = await getSettings();
-  const parsed = buildSettlementFromRows(rows);
+  const parsed = buildSettlementFromRows(rows, {
+    productLines: parseOrderProductLines(document),
+  });
   const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
   const text = buildReconciliationCopyText(rows, calc);
   btn.disabled = true;
@@ -301,7 +304,9 @@ function positionFloatOverlay() {
 function renderCheckColumn(container, settings, rows) {
   removeFloatOverlay();
   if (rows.length === 0) return;
-  const parsed = buildSettlementFromRows(rows);
+  const parsed = buildSettlementFromRows(rows, {
+    productLines: parseOrderProductLines(document),
+  });
   const calc = computeExtensionSettlement(parsed, settings.platformFeeConfig);
   ensureStyles();
   bindPositionListeners();

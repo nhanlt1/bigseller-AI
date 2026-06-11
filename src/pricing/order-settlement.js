@@ -155,13 +155,46 @@ function accumulateShopProductDiscount(data, amount) {
   data.shopProductAdjustment += amount;
 }
 
-export function buildSettlementFromRows(rows) {
+/**
+ * Dòng SP trên trang chi tiết đơn — `.product-list-item` (subtotal ÷ qty = đơn giá VX).
+ * @param {ParentNode} [root]
+ * @returns {{ subtotal: number, quantity: number, unitPrice: number }[]}
+ */
+export function parseOrderProductLines(root = document) {
+  /** @type {{ subtotal: number, quantity: number, unitPrice: number }[]} */
+  const lines = [];
+  const items = root.querySelectorAll(
+    ".order-detail .product-list-item, .product-payment-wrapper .product-list-item",
+  );
+  for (const item of items) {
+    const subtotalEl = item.querySelector(".subtotal");
+    const qtyEl = item.querySelector(".qty");
+    if (!subtotalEl || !qtyEl)
+      continue;
+    const subtotal = parseVndText(subtotalEl.textContent);
+    const quantity = Math.max(1, parseVndText(qtyEl.textContent) || 1);
+    if (subtotal <= 0)
+      continue;
+    lines.push({
+      subtotal,
+      quantity,
+      unitPrice: subtotal / quantity,
+    });
+  }
+  return lines;
+}
+
+export function buildSettlementFromRows(rows, options = {}) {
+  const productLines = Array.isArray(options.productLines)
+    ? options.productLines
+    : [];
   const data = {
     productTotal: 0,
     shopProductAdjustment: 0,
     sellerShippingBurden: 0,
     shippingBuyerForPayment: 0,
     quantity: 1,
+    productLines,
     domCommission: null,
     domPayment: null,
     domPiShip: null,
@@ -197,6 +230,12 @@ export function buildSettlementFromRows(rows) {
       data.shippingBuyerForPayment = v;
   }
   delete data._shopDiscountSeen;
+  if (productLines.length > 0) {
+    data.quantity = productLines.reduce(
+      (sum, line) => sum + Math.max(1, Math.floor(line.quantity ?? 1)),
+      0,
+    );
+  }
   if (!data.productTotal) {
     const first = rows.find(
       (r) => resolveRowRole(r) === "productTotal" || r.value > 1000,
@@ -226,7 +265,12 @@ export function computeSellerSettlement(data, feeConfig) {
     data.domPiShip != null
       ? Math.round(data.domPiShip)
       : 0;
-  const voucherXtra = calcVoucherXtraFee(productBase, feeConfig, quantity);
+  const voucherXtra = calcVoucherXtraFee(
+    productBase,
+    feeConfig,
+    quantity,
+    data.productLines,
+  );
   const infrastructure = feeConfig.infrastructureFeePerOrder;
   const serviceBundle = infrastructure + voucherXtra;
   const payment =
@@ -413,7 +457,7 @@ export function rowCheckTitle(role, calc) {
       calc.netProductBase != null && calc.netProductBase !== calc.productTotal
         ? ` (VX trên ${calc.netProductBase.toLocaleString("vi-VN")}đ sau trợ giá/shop)`
         : "";
-    return `Phí Dịch Vụ = Hạ tầng ${formatSigned(calc.infrastructure)} + Voucher Xtra ${formatSigned(calc.voucherXtra)}${netHint}`;
+    return `Phí Dịch Vụ = Hạ tầng ${formatSigned(calc.infrastructure)} + Voucher Xtra ${formatSigned(calc.voucherXtra)} (min(đơn giá×5,5%, 50k/SP)×SL từng dòng)${netHint}`;
   }
   if (role === "payment") {
     return `Phí xử lý GD (cơ số ${calc.paymentBase.toLocaleString("vi-VN")}đ)`;

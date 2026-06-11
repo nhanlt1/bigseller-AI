@@ -37,7 +37,9 @@ Cập nhật tham chiếu: 06/2026. Tra [Học viện Shopee](https://banhang.sh
 
 ## 5. Đối soát doanh thu đơn Shopee (trang chi tiết đơn)
 
-**Voucher Xtra** (từ 23/05/2026): **5,5% giá trị mỗi sản phẩm**, tối đa **50.000đ/SP** — tính trên đơn giao thành công ([TukiGroup](https://tukigroup.vn/quan-trong-cap-nhat-ve-phi-danh-cho-nguoi-ban-thuoc-shopee-mall-tu-ngay-29-05-2026/), [Effitrack](https://effitrack.me/phi-san-shopee-2026-cap-nhat-moi-nhat-anh-huong/)).
+**Voucher Xtra** (từ 23/05/2026): **5,5% đơn giá từng SP** (thành tiền dòng ÷ số lượng), tối đa **50.000đ/SP**, nhân số lượng từng dòng rồi cộng — không tính % một lần trên tổng đơn ([TukiGroup](https://tukigroup.vn/quan-trong-cap-nhat-ve-phi-danh-cho-nguoi-ban-thuoc-shopee-mall-tu-ngay-29-05-2026/), [Effitrack](https://effitrack.me/phi-san-shopee-2026-cap-nhat-moi-nhat-anh-huong/)).
+
+Ví dụ: thành tiền 84.000đ, SL 2 → đơn giá 42.000đ → VX/SP = min(42.000×5,5%, 50.000) = 2.310đ → tổng VX = 4.620đ → Phí Dịch Vụ = 3.000 + 4.620 = **7.620đ**.
 
 ```text
 Phụ phí = phí cố định + Phí DV (3.000 + VX) + phí GD + PiShip (DOM) + Tiếp thị liên kết (DOM) + NTTD 1%×tiền hàng (chỉ khi đơn có dòng NTTD)
